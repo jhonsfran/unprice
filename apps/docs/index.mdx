@@ -12,8 +12,8 @@ and release the rest. A denied run makes zero provider calls and still leaves a 
 
 <Frame caption="The money path: two requests accepted, the third denied.">
   <div className="w-full overflow-x-auto" tabIndex={0} role="region" aria-label="Money path diagram, scroll horizontally on small screens">
-    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
-    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with BUDGET_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with BUDGET_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
   </div>
 </Frame>
 
@@ -35,7 +35,7 @@ call, API request, data job, workflow, export, or tool run.
     Publish one plan version and map one customer to it.
   </Card>
   <Card title="2. Choose the runtime call" icon="code" href="/quickstart/choose-operation">
-    Select `access.check`, `usage.consume`, `usage.record`, or a budgeted run.
+    Select `access.check`, `usage.consume`, `usage.record`, or a budget.
   </Card>
   <Card title="3. Inspect the evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/usage/get">
     Inspect usage, wallet credits, holds, and invoice evidence.
@@ -48,9 +48,8 @@ call, API request, data job, workflow, export, or tool run.
 | --- | --- | --- |
 | Ask whether a customer may use a feature without changing state | `access.check` | Read-only preflight. Safe for shadow mode. |
 | Enforce a known usage amount in the request path | `usage.consume` | Synchronous decision. Deny when the limit or funds are exhausted. |
-| Report usage without blocking the request | `usage.record` | Asynchronous ingestion. It is not a spend gate. |
-| Hold a maximum for one call whose cost is unknown until it returns | `reservations.reserve` then `reservation.settle` | TypeScript SDK helper over `runs`. The common agent-call shape. |
-| Authorize a budget across a multi-step workload | `runs.start` / `runs.consume` / `runs.settle` / `runs.end` | Full control for a job, workflow, tool chain, or agent. |
+| Report completed usage | `usage.record` | Returns a result for each event. It does not enforce a spend cap. |
+| Hold a maximum for one call whose cost is unknown until it returns | `budget(key).authorize` then `hold.settle` | The common agent-call shape. A run cap is a budget key with `closesAt`. |
 | Cap spend on a key you choose, with no plans or customers in Unprice | `budget(key).spend` | [Unprice Budgets](/budgets/overview). Your billing stays where it is. |
 
 ## Why not a counter?

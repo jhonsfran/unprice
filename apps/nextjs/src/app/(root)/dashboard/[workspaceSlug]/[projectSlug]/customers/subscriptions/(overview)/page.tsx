@@ -59,9 +59,6 @@ export default async function PlanSubscriptionsPage(props: {
           <TabNavigationLink asChild active>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/runs`}>Budgeted Runs</SuperLink>
-          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">

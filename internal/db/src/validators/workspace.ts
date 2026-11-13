@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import * as schema from "../schema"
 import { userSelectBase } from "./auth"
+import { attributionIdSchema } from "./shared"
 import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 
 export const invitesSelectBase = createSelectSchema(schema.invites)
@@ -30,11 +31,11 @@ export const workspaceSignupSchema = workspaceInsertBase
     name: true,
   })
   .extend({
-    planVersionId: z.string().min(1, "Plan version is required").optional(),
+    planVersionId: attributionIdSchema.optional(),
     config: subscriptionItemsConfigSchema.optional(),
     successUrl: z.string().url(),
     cancelUrl: z.string().url(),
-    sessionId: z.string().optional(),
+    pageId: attributionIdSchema.optional(),
   })
 
 export const listMembersSchema = membersSelectBase.extend({

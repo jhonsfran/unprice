@@ -1,5 +1,10 @@
 import { DurableObject } from "cloudflare:workers"
-import type { BudgetInspectQuery, BudgetInspectReply } from "@unprice/services/budgets"
+import {
+  type BudgetInspectQuery,
+  type BudgetInspectReply,
+  definesBudget,
+} from "@unprice/services/budgets"
+import type { CardRows } from "@unprice/services/pricing"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -8,6 +13,7 @@ import { createDoLogger } from "~/observability"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
+import { journalOf } from "./journal"
 import { BudgetProcessor } from "./processor"
 
 /** Cloudflare adapter; budget behavior lives in BudgetProcessor and the pure core. */
@@ -27,6 +33,7 @@ export class BudgetDO extends DurableObject {
 
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.processor = new BudgetProcessor({
+      journal: journalOf(env),
       clock: { now: () => Date.now() },
       logger: createDoLogger(this.ctx.id.toString()),
       runtime: { destroy: () => this.destroy() },
@@ -39,18 +46,15 @@ export class BudgetDO extends DurableObject {
     this.ready = this.hasSchema() ? this.prepare() : null
   }
 
-  async execute(request: BudgetRequest): Promise<BudgetReply> {
-    const fresh = !this.ready
-    if (fresh) {
-      const creates = request.type === "upsert" || ("ifMissing" in request && !!request.ifMissing)
-      if (!creates) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
+  async execute(request: BudgetRequest, cards?: readonly CardRows[]): Promise<BudgetReply> {
+    if (!this.ready) {
+      if (!definesBudget(request)) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
       this.ready = this.prepare()
     }
     await this.ready
-    const reply = await this.processor.execute(request)
-    // A first call that was refused left a schema and no budget: the storage a mistyped key must
-    // not keep. Drop it, so the key reads as never upserted again.
-    if (fresh && !reply.ok && !this.processor.hasBudget()) await this.destroy()
+    const reply = await this.processor.execute(request, cards)
+    // A refused first call leaves no budget or storage behind.
+    if (!reply.ok && !this.processor.hasBudget()) await this.destroy()
     return reply
   }
 
@@ -73,6 +77,7 @@ export class BudgetDO extends DurableObject {
   override async alarm(): Promise<void> {
     if (!this.ready) return
     await this.ready
+    if (!this.processor.hasBudget()) return this.destroy()
     return this.processor.alarm()
   }
 

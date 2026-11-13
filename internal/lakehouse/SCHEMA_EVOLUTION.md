@@ -2,13 +2,13 @@
 
 This package is the source of truth for lakehouse event schema.
 
-This package is not a customer-facing query API. It only owns the Pipeline/R2 events schema used by the reporting consumer. Cloudflare Data Catalog partitioning is controlled by the sink's ingestion-time behavior; project_id, customer_id, and event_date are query columns, not partition guarantees.
+It owns the Pipeline/R2 schemas of the `web_events` and `budget_journal` sources, and the Basin SQL client that reads them. Cloudflare Data Catalog partitioning is controlled by the sink's ingestion-time behavior; project_id, customer_id, and event_date are query columns, not partition guarantees.
 
 ## Source Of Truth
 
 - Registry: `internal/lakehouse/src/registry.ts`
 - Runtime validation: `internal/lakehouse/src/zod.ts` (generated from registry)
-- Event TS types: `internal/lakehouse/src/interface.ts` (derived from registry types)
+- Event TS types: `LakehouseEventForSource<S>` in `internal/lakehouse/src/registry.ts`
 - Cloudflare stream schemas (`apps/api/scripts/schemas/*.json`) are generated from registry.
 
 Do not hand-edit `apps/api/scripts/schemas/*.json`.
@@ -59,13 +59,9 @@ Cloudflare conversions/normalization are handled by `toCloudflarePipelineSchema(
    - `description` with clear semantics
 3. Bump that source `currentVersion` if needed.
 4. Prefer `required: false` first unless every producer can immediately populate it.
-5. Update event production: `internal/services/src/ingestion/reporting-envelope.ts`
-   (`buildIngestionAuditPayload`) populates the payload; records are published by
-   `apps/api/src/ingestion/reporting/audit-record-publisher.ts` (R2 Pipelines) and
-   `apps/api/src/ingestion/reporting/consumer.ts` (Tinybird `unprice_ingestion_events`
-   + `unprice_entitlement_meter_facts`). Customer-visible fields also require
-   `internal/analytics` datasource/pipe/fixture updates — see the checklist in
-   docs/observability/ingestion-reporting.md.
+5. Update the producer: `createWebEventsWriter` (`internal/lakehouse/src/web-events.ts`) for
+   `web_events`, and the BudgetDO journal export (`apps/api/src/ingestion/budget/journal.ts`) for
+   `budget_journal`.
 6. Regenerate Cloudflare stream schemas:
    - `cd apps/api && npm run scripts:lakehouse-schemas`
 7. Recreate pipeline resources for the target environment:

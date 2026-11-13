@@ -2,8 +2,11 @@ import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 
 import { planVersionFeatureSelectBaseSchema } from "@unprice/db/validators"
+import { removePlanVersionFeature } from "@unprice/services/use-cases"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
+/** Detaches a feature from a draft version and ends its rows on the version's own card. */
 export const remove = protectedProjectProcedure
   .input(
     planVersionFeatureSelectBaseSchema
@@ -16,22 +19,17 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const { plans } = opts.ctx.services
+    const { plans, rateCards } = opts.ctx.services
 
     // only owner and admin can delete a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { err, val } = await plans.removePlanVersionFeatureRecord({
-      projectId: project.id,
-      id,
-    })
+    const { err, val } = await removePlanVersionFeature(
+      { db: opts.ctx.db, services: { plans, rateCards } },
+      { projectId: project.id, id, now: Date.now() }
+    )
 
-    if (err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: err.message,
-      })
-    }
+    if (err) throw domainErrorToTrpcError(err)
 
     if (val.state === "not_found") {
       throw new TRPCError({

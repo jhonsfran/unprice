@@ -5,7 +5,8 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetToWire, runBudgetVerb, toWire } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { budgetToWire, periodToWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -38,5 +39,8 @@ export const registerGetBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { key } = c.req.valid("query")
     const { budget, history } = await runBudgetVerb(c, key, { type: "get" })
-    return c.json({ budget: budgetToWire(budget), history: toWire(history) }, HttpStatusCodes.OK)
+    return c.json(
+      { budget: budgetToWire(budget), history: history.map(periodToWire) },
+      HttpStatusCodes.OK
+    )
   })

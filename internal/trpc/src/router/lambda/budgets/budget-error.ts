@@ -17,7 +17,7 @@ const RELEASE_REJECTED: Record<
   HOLD_CLOSED: {
     code: "CONFLICT",
     message: (holdId) =>
-      `${holdId} already closed. Its caller settled it, or it expired and was charged in full. Nothing was released.`,
+      `${holdId} already closed. Its caller settled it, or it expired and the budget settled it. Nothing was released.`,
   },
   HOLD_RETIRED: {
     code: "CONFLICT",

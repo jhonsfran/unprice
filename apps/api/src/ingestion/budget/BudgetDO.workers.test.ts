@@ -6,12 +6,18 @@ import {
 } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { sha256HexSync } from "@unprice/db/utils"
-import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
+import {
+  type BudgetConfigInput,
+  upsertBudgetInputSchema,
+  upsertBudgetInternalInputSchema,
+} from "@unprice/db/validators"
 import {
   type BudgetOutcome,
   CLOSED_BUDGET_RETENTION_MS,
   EXPIRED_PER_SWEEP,
+  amountUsage,
 } from "@unprice/services/budgets"
+import { CARD_FROM, enterpriseOverlay, usdCard } from "@unprice/services/pricing/fixtures"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { and, asc, eq, lte, min, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -22,13 +28,21 @@ import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
-import { ALARM_CONTINUE_MS, BudgetProcessor } from "./processor"
+import { discardJournal } from "./journal"
+import {
+  ALARM_CONTINUE_MS,
+  BudgetProcessor,
+  JOURNAL_EXPORT_DELAY_MS,
+  UNFINISHED_BILLING_RECHECK_MS,
+} from "./processor"
 
 const UNIT = BigInt(100_000_000)
 const units = (value: number) => BigInt(Math.round(value * 100)) * (UNIT / BigInt(100))
 const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
+/** What the ledger stores in `held` when nothing is reserved. */
+const NO_HELD = JSON.stringify({ amount: { $bigint: "0" }, quantities: {} })
 
 /**
  * 12:30 UTC on the 10th of next month: far enough that real alarms never fire mid-test, and far
@@ -74,6 +88,7 @@ function realStorageProcessor(
   destroyed: number[] = []
 ) {
   return new BudgetProcessor({
+    journal: discardJournal,
     clock: { now },
     logger: { error: (message, fields) => errors.push(`${message}: ${fields.error}`) },
     runtime: {
@@ -103,22 +118,26 @@ describe("BudgetDO runtime assumptions", () => {
     await stub.execute(upsert(key, fiftyPerMonth))
 
     const held = outcome(
-      await stub.execute({ type: "authorize", idempotencyKey: "a1", amount: units(10) }),
+      await stub.execute({
+        type: "authorize",
+        idempotencyKey: "a1",
+        usage: amountUsage(units(10)),
+      }),
       "authorize"
     )
-    expect(held.amount).toBe(BigInt(1_000_000_000))
+    expect(held.reserved).toEqual({ amount: BigInt(1_000_000_000), quantities: {} })
     expect(held.balance.remaining).toBe(BigInt(4_000_000_000))
 
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       expect(
         state.storage.sql.exec("SELECT held, typeof(held) AS type FROM budget_ledger").one()
-      ).toEqual({ held: "1000000000", type: "text" })
+      ).toEqual({ held: '{"amount":{"$bigint":"1000000000"},"quantities":{}}', type: "text" })
       const row = state.storage.sql
         .exec("SELECT data_json FROM budget_operations WHERE id = 'h_1'")
         .one() as { data_json: string }
       expect(JSON.parse(row.data_json)).toMatchObject({
         idempotencyKey: "a1",
-        amount: { $bigint: "1000000000" },
+        reserved: { amount: { $bigint: "1000000000" }, quantities: {} },
         ttlMs: null,
       })
     })
@@ -129,7 +148,11 @@ describe("BudgetDO runtime assumptions", () => {
     const stub = stubFor(key)
     await stub.execute(upsert(key, fiftyPerMonth))
     const longKey = "k".repeat(256)
-    const charge: BudgetRequest = { type: "charge", idempotencyKey: longKey, amount: units(1) }
+    const charge: BudgetRequest = {
+      type: "charge",
+      idempotencyKey: longKey,
+      usage: amountUsage(units(1)),
+    }
 
     expect(outcome(await stub.execute(charge), "charge").replayed).toBe(false)
     expect(outcome(await stub.execute(charge), "charge").replayed).toBe(true)
@@ -148,17 +171,56 @@ describe("BudgetDO runtime assumptions", () => {
       const db = drizzle(state.storage)
       const entries = migrations.journal.entries.filter((entry) => entry.idx < 2)
       await migrate(db, { ...migrations, journal: { ...migrations.journal, entries } })
-      const hold = { idempotencyKey: "legacy", amount: { $bigint: "1" }, ttlMs: null, expiresAt }
+      const hold = {
+        idempotencyKey: "legacy",
+        reserved: { amount: { $bigint: "1" }, quantities: {} },
+        ttlMs: null,
+        expiresAt,
+      }
       state.storage.sql.exec(
         "INSERT INTO budget_operations (id, kind, status, due_at, data_json) VALUES ('h_1', 'hold', 'open', 0, ?)",
         JSON.stringify({ ...hold, createdAt: expiresAt - MINUTE, state: { status: "open" } })
       )
 
-      await migrate(db, migrations)
+      const through0006 = migrations.journal.entries.filter((entry) => entry.idx < 7)
+      await migrate(db, { ...migrations, journal: { ...migrations.journal, entries: through0006 } })
 
       expect(state.storage.sql.exec("SELECT due_at FROM budget_operations").one()).toEqual({
         due_at: expiresAt,
       })
+    })
+  })
+
+  it("clears rows stored before usage vectors, so the next upsert creates the budget anew", async () => {
+    const key = "customer:legacy"
+    const stub = stubFor(key)
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const db = drizzle(state.storage)
+      const entries = migrations.journal.entries.filter((entry) => entry.idx < 7)
+      await migrate(db, { ...migrations, journal: { ...migrations.journal, entries } })
+      const sql = state.storage.sql
+      sql.exec(
+        "INSERT INTO budget (id, key, project_id, unit, version, config_json, updated_at) VALUES (1, ?, 'proj_1', 'money:USD', 1, ?, 0)",
+        key,
+        '{"limits":[{"id":"month","window":"month","enforce":"hard","amount":{"$bigint":"5000000000"}}]}'
+      )
+      sql.exec(
+        "INSERT INTO budget_ledger (id, last_at, hold_seq, held, usage_json) VALUES (1, 0, 1, '0', '{}')"
+      )
+      sql.exec(
+        "INSERT INTO budget_operations (id, kind, status, due_at, data_json) VALUES ('h_1', 'hold', 'open', 0, ?)",
+        JSON.stringify({ idempotencyKey: "legacy", amount: "1", state: { status: "open" } })
+      )
+
+      await migrate(db, migrations)
+
+      const count = (table: string) =>
+        sql.exec(`SELECT count(*) AS n FROM ${table}`).one() as { n: number }
+      expect(
+        ["budget", "budget_ledger", "budget_operations", "budget_window_history"].map(
+          (table) => count(table).n
+        )
+      ).toEqual([0, 0, 0, 0])
     })
   })
 
@@ -225,20 +287,27 @@ describe("BudgetDO verbs", () => {
     expect(created.budget.version).toBe(1)
 
     const hold = outcome(
-      await stub.execute({ type: "authorize", idempotencyKey: "a1", amount: units(10) }),
+      await stub.execute({
+        type: "authorize",
+        idempotencyKey: "a1",
+        usage: amountUsage(units(10)),
+      }),
       "authorize"
     )
     expect(hold.holdId).toBe("h_1")
 
     const settled = outcome(
-      await stub.execute({ type: "settle", holdId: "h_1", amount: units(7) }),
+      await stub.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(7)) }),
       "settle"
     )
-    expect([settled.actual, settled.released]).toEqual([units(7), units(3)])
+    expect([settled.actual, settled.released]).toEqual([
+      amountUsage(units(7)),
+      amountUsage(units(3)),
+    ])
     expect(settled.balance.remaining).toBe(units(43))
 
     const charged = outcome(
-      await stub.execute({ type: "charge", idempotencyKey: "c1", amount: units(3) }),
+      await stub.execute({ type: "charge", idempotencyKey: "c1", usage: amountUsage(units(3)) }),
       "charge"
     )
     expect(charged.balance.remaining).toBe(units(40))
@@ -248,7 +317,7 @@ describe("BudgetDO verbs", () => {
         type: "record",
         idempotencyKey: "r1",
         occurredAt: Date.now(),
-        amount: units(40),
+        usage: amountUsage(units(40)),
       }),
       "record"
     )
@@ -256,7 +325,7 @@ describe("BudgetDO verbs", () => {
     expect(recorded.balance.remaining).toBe(BigInt(0))
 
     const denied = rejection(
-      await stub.execute({ type: "charge", idempotencyKey: "c2", amount: units(1) })
+      await stub.execute({ type: "charge", idempotencyKey: "c2", usage: amountUsage(units(1)) })
     )
     expect(denied).toMatchObject({
       code: "LIMIT_EXCEEDED",
@@ -274,7 +343,9 @@ describe("BudgetDO verbs", () => {
       status: "settled",
     })
     expect(
-      rejection(await stub.execute({ type: "settle", holdId: "h_99", amount: units(1) }))
+      rejection(
+        await stub.execute({ type: "settle", holdId: "h_99", actual: amountUsage(units(1)) })
+      )
     ).toEqual({ code: "HOLD_NOT_FOUND", holdId: "h_99" })
 
     // A charge or record key and a hold key are one namespace, through the id and the hold index.
@@ -284,12 +355,18 @@ describe("BudgetDO verbs", () => {
           type: "record",
           idempotencyKey: "a1",
           occurredAt: Date.now(),
-          amount: units(1),
+          usage: amountUsage(units(1)),
         })
       )
     ).toMatchObject({ code: "IDEMPOTENCY_CONFLICT" })
     expect(
-      rejection(await stub.execute({ type: "authorize", idempotencyKey: "c1", amount: units(1) }))
+      rejection(
+        await stub.execute({
+          type: "authorize",
+          idempotencyKey: "c1",
+          usage: amountUsage(units(1)),
+        })
+      )
     ).toMatchObject({ code: "IDEMPOTENCY_CONFLICT" })
 
     const read = outcome(await stub.execute({ type: "get" }), "get")
@@ -324,7 +401,10 @@ describe("BudgetDO verbs", () => {
       expiresAt: granted.balance.asOf + MINUTE,
       status: "open",
     })
-    expect([granted.balance.remaining, granted.balance.held]).toEqual([units(30), units(20)])
+    expect([granted.balance.remaining, granted.balance.held]).toEqual([
+      units(30),
+      amountUsage(units(20)),
+    ])
 
     const reported = outcome(
       await stub.execute({
@@ -381,7 +461,11 @@ describe("BudgetDO verbs", () => {
     // A lease key and an idempotency key are separate namespaces.
     expect(
       outcome(
-        await stub.execute({ type: "charge", idempotencyKey: "proc-1", amount: units(1) }),
+        await stub.execute({
+          type: "charge",
+          idempotencyKey: "proc-1",
+          usage: amountUsage(units(1)),
+        }),
         "charge"
       ).replayed
     ).toBe(false)
@@ -395,7 +479,7 @@ describe("BudgetDO verbs", () => {
     })
     const read = outcome(await stub.execute({ type: "get" }), "get")
     expect([read.budget.balance.held, read.budget.operations]).toEqual([
-      BigInt(0),
+      amountUsage(BigInt(0)),
       { upsert: 1, authorize: 0, settle: 0, release: 0, charge: 1, record: 0, lease: 1, report: 2 },
     ])
   })
@@ -407,14 +491,20 @@ describe("BudgetDO verbs", () => {
     await stub.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
 
     expect(
-      rejection(await stub.execute({ type: "authorize", idempotencyKey: "a1", amount: units(1) }))
+      rejection(
+        await stub.execute({
+          type: "authorize",
+          idempotencyKey: "a1",
+          usage: amountUsage(units(1)),
+        })
+      )
     ).toEqual({ code: "BUDGET_CLOSED", closedAt: closesAt })
     const recorded = outcome(
       await stub.execute({
         type: "record",
         idempotencyKey: "r1",
         occurredAt: Date.now(),
-        amount: units(2),
+        usage: amountUsage(units(2)),
       }),
       "record"
     )
@@ -427,7 +517,9 @@ describe("BudgetDO verbs", () => {
     const stub = stubFor()
     expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
     expect(
-      rejection(await stub.execute({ type: "settle", holdId: "h_1", amount: units(1) }))
+      rejection(
+        await stub.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(1)) })
+      )
     ).toEqual({ code: "BUDGET_NOT_FOUND" })
 
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
@@ -449,7 +541,7 @@ describe("BudgetDO verbs", () => {
         stub.execute({
           type: "authorize",
           idempotencyKey: `race-${index}`,
-          amount: units(0.75),
+          usage: amountUsage(units(0.75)),
         })
       )
     )
@@ -459,7 +551,7 @@ describe("BudgetDO verbs", () => {
       replies.filter((reply) => !reply.ok && reply.rejection.code === "LIMIT_EXCEEDED")
     ).toHaveLength(34)
     const read = outcome(await stub.execute({ type: "get" }), "get")
-    expect(read.budget.balance.held).toBe(units(49.5))
+    expect(read.budget.balance.held).toEqual(amountUsage(units(49.5)))
     expect(read.budget.balance.remaining).toBe(units(0.5))
   })
 
@@ -467,20 +559,24 @@ describe("BudgetDO verbs", () => {
     const key = "customer:replay"
     const stub = stubFor(key)
     await stub.execute(upsert(key, fiftyPerMonth))
-    const request = { type: "authorize", idempotencyKey: "k1", amount: units(5) } as const
+    const request = {
+      type: "authorize",
+      idempotencyKey: "k1",
+      usage: amountUsage(units(5)),
+    } as const
 
     const first = outcome(await stub.execute(request), "authorize")
     const retry = outcome(await stub.execute(request), "authorize")
     expect([first.holdId, first.replayed]).toEqual(["h_1", false])
-    expect([retry.holdId, retry.amount, retry.expiresAt, retry.replayed]).toEqual([
+    expect([retry.holdId, retry.reserved, retry.expiresAt, retry.replayed]).toEqual([
       "h_1",
-      units(5),
+      amountUsage(units(5)),
       first.expiresAt,
       true,
     ])
-    expect(retry.balance.held).toBe(units(5))
+    expect(retry.balance.held).toEqual(amountUsage(units(5)))
 
-    expect(rejection(await stub.execute({ ...request, amount: units(6) }))).toEqual({
+    expect(rejection(await stub.execute({ ...request, usage: amountUsage(units(6)) }))).toEqual({
       code: "IDEMPOTENCY_CONFLICT",
       idempotencyKey: "k1",
     })
@@ -490,7 +586,7 @@ describe("BudgetDO verbs", () => {
     const key = "customer:evict"
     const stub = stubFor(key)
     await stub.execute(upsert(key, fiftyPerMonth))
-    await stub.execute({ type: "authorize", idempotencyKey: "k1", amount: units(12) })
+    await stub.execute({ type: "authorize", idempotencyKey: "k1", usage: amountUsage(units(12)) })
 
     await evictDurableObject(stub)
 
@@ -499,20 +595,67 @@ describe("BudgetDO verbs", () => {
       await revived.execute({
         type: "authorize",
         idempotencyKey: "k1",
-        amount: units(12),
+        usage: amountUsage(units(12)),
       }),
       "authorize"
     )
-    expect([replay.holdId, replay.replayed, replay.balance.held]).toEqual(["h_1", true, units(12)])
+    expect([replay.holdId, replay.replayed, replay.balance.held]).toEqual([
+      "h_1",
+      true,
+      amountUsage(units(12)),
+    ])
     const next = outcome(
       await revived.execute({
         type: "authorize",
         idempotencyKey: "k2",
-        amount: units(1),
+        usage: amountUsage(units(1)),
       }),
       "authorize"
     )
     expect(next.holdId).toBe("h_2")
+  })
+
+  it("keeps a quantity counter across eviction", async () => {
+    const key = "customer:evict-images"
+    const stub = stubFor(key)
+    const parsed = upsertBudgetInternalInputSchema.parse({
+      key,
+      unit: "USD",
+      limits: [
+        { amount: "50", window: "month" },
+        { feature: "images", amount: "3", window: "month" },
+      ],
+    })
+    await stub.execute({ type: "upsert", projectId: "proj_1", ...parsed, mayLoosen: true })
+    const images = (n: number) => ({ amount: units(n), quantities: { images: units(n) } })
+    outcome(
+      await stub.execute({ type: "charge", idempotencyKey: "c1", usage: images(2) }),
+      "charge"
+    )
+
+    await evictDurableObject(stub)
+
+    const revived = getBudgetStub(env, { projectId: "proj_1", key })
+    const read = outcome(await revived.execute({ type: "get" }), "get")
+    expect(read.budget.balance.limits.map((l) => [l.id, l.consumed, l.remaining])).toEqual([
+      ["month", units(2), units(48)],
+      ["images:month", units(2), units(1)],
+    ])
+    expect(
+      rejection(await revived.execute({ type: "charge", idempotencyKey: "c2", usage: images(2) }))
+    ).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: { limitId: "images:month", remaining: units(1) },
+    })
+    await runInDurableObject(revived, (_instance: BudgetDO, state) => {
+      const ledger = state.storage.sql.exec("SELECT usage_json FROM budget_ledger").one() as {
+        usage_json: string
+      }
+      expect(JSON.parse(ledger.usage_json).month.consumed).toEqual({
+        amount: { $bigint: "200000000" },
+        quantities: { images: { $bigint: "200000000" } },
+      })
+    })
   })
 
   it("rolls back the ledger when a later write in the same command fails", async () => {
@@ -532,13 +675,16 @@ describe("BudgetDO verbs", () => {
       const request = {
         type: "authorize",
         idempotencyKey: "k1",
-        amount: units(5),
+        usage: amountUsage(units(5)),
       } as const
-      await expect(processor.execute(request)).rejects.toThrow("fail after ledger write")
+      await expect(processor.execute(request, [usdCard])).rejects.toThrow("fail after ledger write")
+      expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_cards").one()).toEqual({
+        n: 0,
+      })
 
       expect(state.storage.sql.exec("SELECT hold_seq, held FROM budget_ledger").one()).toEqual({
         hold_seq: 0,
-        held: "0",
+        held: NO_HELD,
       })
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
@@ -546,6 +692,240 @@ describe("BudgetDO verbs", () => {
 
       state.storage.sql.exec("DROP TRIGGER fail_hold_row")
       expect(outcome(await processor.execute(request), "authorize").holdId).toBe("h_1")
+    })
+  })
+})
+
+describe("BudgetDO statements", () => {
+  const NOV = CARD_FROM
+  const DEC = Date.parse("2026-12-01T00:00:00.000Z")
+  const apiBatch = (calls: number) => ({ slug: "api.batch", properties: { calls } })
+
+  function pricedUpsert(key: string): BudgetRequest {
+    const parsed = upsertBudgetInternalInputSchema.parse({
+      key,
+      unit: "USD",
+      limits: [],
+      pricing: {
+        cards: { base: usdCard.card.id },
+        features: [
+          {
+            slug: "api_calls",
+            eventSlug: "api.batch",
+            dimensions: [],
+            meterProperty: "calls",
+            included: null,
+            priced: true,
+          },
+        ],
+      },
+    })
+    return { type: "upsert", projectId: "proj_1", ...parsed, mayLoosen: true }
+  }
+
+  it("prices from the cached card and the stored positions, and seals and completes", async () => {
+    const key = "unprice:customer:cus_statements"
+    const stub = stubFor(key)
+    let now = NOV + 3 * DAY
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      outcome(await processor.execute(pricedUpsert(key), [usdCard]), "upsert")
+      const period = {
+        periodId: "api_calls:inv_2026-11",
+        statementKey: "inv_2026-11",
+        featureSlug: "api_calls",
+        start: NOV,
+        end: DEC,
+      }
+      outcome(
+        await processor.execute({ type: "registerStatements", statements: [period] }),
+        "registerStatements"
+      )
+      // 10,000 calls are free; entering the second tier costs $5 plus $0.001 a call.
+      const first = outcome(
+        await processor.execute({ type: "charge", idempotencyKey: "c1", event: apiBatch(8_000) }),
+        "charge"
+      )
+      const second = outcome(
+        await processor.execute({ type: "charge", idempotencyKey: "c2", event: apiBatch(4_000) }),
+        "charge"
+      )
+      expect([first.usage.amount, second.usage.amount]).toEqual([BigInt(0), units(7)])
+      expect(
+        state.storage.sql.exec("SELECT period_id, value FROM budget_positions").toArray()
+      ).toEqual([{ period_id: period.periodId, value: (BigInt(12_000) * UNIT).toString() }])
+
+      now = DEC + HOUR
+      outcome(
+        await processor.execute({ type: "sealStatements", statementKey: "inv_2026-11", at: DEC }),
+        "sealStatements"
+      )
+      outcome(
+        await processor.execute({ type: "completeStatements", periodIds: [period.periodId] }),
+        "completeStatements"
+      )
+    })
+
+    await evictDurableObject(stub)
+    const read = outcome(await stub.execute({ type: "statements" }), "statements")
+    expect(read.statements).toEqual([])
+    await runInDurableObject(stub, (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT period_id, state, events, completed_at FROM budget_statements")
+          .toArray()
+      ).toEqual([
+        {
+          period_id: "api_calls:inv_2026-11",
+          state: "completed",
+          events: 2,
+          completed_at: DEC + HOUR,
+        },
+      ])
+      const store = new BudgetSqliteStore(drizzle(state.storage, { schema, logger: false }))
+      const [statement] = store.atomically((tx) => tx.readStatements(["api_calls:inv_2026-11"]))
+      expect(statement).toMatchObject({
+        amount: units(7),
+        quantity: BigInt(12_000) * UNIT,
+        cost: null,
+        lastEventAt: NOV + 3 * DAY,
+      })
+      expect(Object.values(statement?.positions ?? {})).toEqual([BigInt(12_000) * UNIT])
+      expect(
+        store.atomically((tx) => Object.keys(tx.readCards([usdCard.card.id, "rc_missing"])))
+      ).toEqual([usdCard.card.id])
+    })
+  })
+})
+
+describe("BudgetDO card cache", () => {
+  it("creates a priced budget with fresh cards and deletes a refused first call", async () => {
+    const parsedFor = (key: string) =>
+      upsertBudgetInternalInputSchema.parse({
+        key,
+        unit: "USD",
+        limits: [],
+        pricing: {
+          cards: { base: usdCard.card.id },
+          features: [
+            {
+              slug: "images",
+              eventSlug: "image.generated",
+              dimensions: ["size"],
+              meterProperty: null,
+              included: null,
+              priced: true,
+            },
+          ],
+        },
+      })
+    const created = stubFor("customer:priced-create")
+    const create: BudgetRequest = {
+      type: "upsert",
+      projectId: "proj_1",
+      ...parsedFor("customer:priced-create"),
+      mayLoosen: true,
+    }
+    expect(rejection(await created.execute(create))).toEqual({
+      code: "CARDS_STALE",
+      cardIds: [usdCard.card.id],
+    })
+    await runInDurableObject(created, (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT name FROM sqlite_master WHERE name = 'budget_cards'")
+          .toArray()
+      ).toEqual([])
+    })
+    expect(outcome(await created.execute(create, [usdCard]), "upsert").budget.version).toBe(1)
+
+    const refused = stubFor("customer:refused-create")
+    const badCreate = { ...create, unit: "credits:ai" }
+    expect(rejection(await refused.execute(badCreate, [usdCard]))).toMatchObject({
+      code: "UNIT_MISMATCH",
+    })
+    await runInDurableObject(refused, async (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT name FROM sqlite_master WHERE name = 'budget_cards'")
+          .toArray()
+      ).toEqual([])
+      await expect(state.storage.getAlarm()).resolves.toBeNull()
+    })
+  })
+
+  it("asks for a refresh of a card cached five minutes ago", async () => {
+    const key = "customer:card-refresh"
+    const stub = stubFor(key)
+    const t0 = CARD_FROM + DAY
+    let now = t0
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      const parsed = upsertBudgetInternalInputSchema.parse({
+        key,
+        unit: "USD",
+        limits: [],
+        pricing: {
+          cards: { base: usdCard.card.id, overlay: enterpriseOverlay.card.id },
+          features: [
+            {
+              slug: "images",
+              eventSlug: "image.generated",
+              dimensions: ["size"],
+              meterProperty: null,
+              included: null,
+              priced: true,
+            },
+          ],
+        },
+      })
+      outcome(
+        await processor.execute(
+          {
+            type: "upsert",
+            projectId: "proj_1",
+            ...parsed,
+            mayLoosen: true,
+          },
+          [usdCard, enterpriseOverlay]
+        ),
+        "upsert"
+      )
+      await processor.execute({
+        type: "registerStatements",
+        statements: [
+          {
+            periodId: "images:nov",
+            statementKey: "nov",
+            featureSlug: "images",
+            start: CARD_FROM,
+            end: Date.parse("2026-12-01T00:00:00.000Z"),
+          },
+        ],
+      })
+      const image = { slug: "image.generated", properties: { size: "1024" } }
+      now = t0 + 5 * MINUTE
+      expect(
+        rejection(await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }))
+      ).toEqual({ code: "CARDS_STALE", cardIds: [usdCard.card.id, enterpriseOverlay.card.id] })
+      expect(
+        rejection(
+          await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }, [usdCard])
+        )
+      ).toEqual({ code: "CARDS_STALE", cardIds: [enterpriseOverlay.card.id] })
+      expect(
+        state.storage.sql.exec("SELECT refreshed_at FROM budget_cards ORDER BY card_id").toArray()
+      ).toEqual([{ refreshed_at: t0 }, { refreshed_at: t0 }])
+      const charged = outcome(
+        await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }, [
+          usdCard,
+          enterpriseOverlay,
+        ]),
+        "charge"
+      )
+      expect(charged.usage.amount).toBe(units(0.04))
     })
   })
 })
@@ -563,13 +943,15 @@ describe("BudgetDO alarm", () => {
       await processor.execute({
         type: "authorize",
         idempotencyKey: "unknown-provider-result",
-        amount: units(40),
+        usage: amountUsage(units(40)),
         ttlMs: 1_000,
       })
       await expect(state.storage.getAlarm()).resolves.toBe(t0 + 1_000)
       now += 2 * 24 * HOUR
       await processor.alarm()
-      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({ held: "0" })
+      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({
+        held: NO_HELD,
+      })
       expect(
         state.storage.sql.exec("SELECT status, due_at FROM budget_operations").toArray()
       ).toEqual([{ status: "settled", due_at: now + 24 * HOUR }])
@@ -578,34 +960,37 @@ describe("BudgetDO alarm", () => {
           await processor.execute({
             type: "charge",
             idempotencyKey: "competitor",
-            amount: units(11),
+            usage: amountUsage(units(11)),
           })
         ).code
       ).toBe("LIMIT_EXCEEDED")
       expect(
-        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(35) }))
+        rejection(
+          await processor.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(35)) })
+        )
       ).toEqual({ code: "HOLD_CLOSED", holdId: "h_1", status: "expired" })
       const final = outcome(
-        await processor.execute({ type: "settle", holdId: "h_1", amount: units(40) }),
+        await processor.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(40)) }),
         "settle"
       )
       expect([final.expired, final.replayed, final.actual, final.balance.remaining]).toEqual([
         true,
         true,
-        units(40),
+        amountUsage(units(40)),
         units(10),
       ])
       await expect(state.storage.getAlarm()).resolves.toBe(now + 24 * HOUR)
       now += 24 * HOUR
       await processor.alarm()
       expect(
-        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(35) }))
-          .code
+        rejection(
+          await processor.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(35)) })
+        ).code
       ).toBe("HOLD_RETIRED")
     })
     await evictDurableObject(stub)
     const read = outcome(await stub.execute({ type: "get" }), "get")
-    expect(read.budget.balance.held).toBe(BigInt(0))
+    expect(read.budget.balance.held).toEqual(amountUsage(BigInt(0)))
   })
 
   it("expires an unreported lease into consumption of its whole grant when its alarm fires", async () => {
@@ -649,7 +1034,9 @@ describe("BudgetDO alarm", () => {
 
       now = t0 + 20_000
       await processor.alarm()
-      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({ held: "0" })
+      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({
+        held: NO_HELD,
+      })
       expect(
         state.storage.sql.exec("SELECT status, due_at FROM budget_operations").toArray()
       ).toEqual([{ status: "done", due_at: now + DAY }])
@@ -677,7 +1064,7 @@ describe("BudgetDO alarm", () => {
           await processor.execute({
             type: "charge",
             idempotencyKey: "next-day",
-            amount: units(50),
+            usage: amountUsage(units(50)),
           }),
           "charge"
         ).balance.remaining
@@ -701,7 +1088,11 @@ describe("BudgetDO alarm", () => {
       const processor = realStorageProcessor(state, () => now)
       await processor.execute(upsert(key, fiftyPerMonth))
       outcome(
-        await processor.execute({ type: "authorize", idempotencyKey: "k1", amount: units(50) }),
+        await processor.execute({
+          type: "authorize",
+          idempotencyKey: "k1",
+          usage: amountUsage(units(50)),
+        }),
         "authorize"
       )
 
@@ -714,8 +1105,8 @@ describe("BudgetDO alarm", () => {
           .exec("SELECT id, status, due_at FROM budget_operations WHERE kind = 'lease'")
           .toArray()
       ).toEqual([{ id: `l:${sha256HexSync("proc-1")}`, status: "done", due_at: t0 + 10 * MINUTE }])
-      // The refusal is a rejection, and it still lowers the alarm to its own purge.
-      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 10 * MINUTE)
+      // The refusal is a rejection, and it is still written, so the alarm comes to export it.
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + JOURNAL_EXPORT_DELAY_MS)
 
       outcome(await processor.execute({ type: "release", holdId: "h_1" }), "release")
       now = t0 + 10 * MINUTE - 1
@@ -755,7 +1146,7 @@ describe("BudgetDO alarm", () => {
           await processor.execute({
             type: "authorize",
             idempotencyKey: `hold-${i}`,
-            amount: units(1),
+            usage: amountUsage(units(1)),
             ttlMs: 1_000,
           }),
           "authorize"
@@ -765,8 +1156,8 @@ describe("BudgetDO alarm", () => {
       await processor.alarm()
       // A full batch leaves expired holds behind, so the alarm comes straight back for them.
       await expect(state.storage.getAlarm()).resolves.toBe(now + ALARM_CONTINUE_MS)
-      expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toBe(
-        units(44)
+      expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toEqual(
+        amountUsage(units(44))
       )
       now += ALARM_CONTINUE_MS
       await processor.alarm()
@@ -774,13 +1165,20 @@ describe("BudgetDO alarm", () => {
     await evictDurableObject(stub)
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       const processor = realStorageProcessor(state, () => now)
-      const request = { type: "authorize", idempotencyKey: "next", amount: units(1) } as const
+      const request = {
+        type: "authorize",
+        idempotencyKey: "next",
+        usage: amountUsage(units(1)),
+      } as const
       expect(rejection(await processor.execute(request))).toMatchObject({
         code: "LIMIT_EXCEEDED",
         blocked: { limitId: "cap", remedy: "wait_for_reset" },
       })
       const balance = outcome(await processor.execute({ type: "get" }), "get").budget.balance
-      expect([balance.held, balance.limits[0]?.consumed]).toEqual([BigInt(0), units(holds)])
+      expect([balance.held, balance.limits[0]?.consumed]).toEqual([
+        amountUsage(BigInt(0)),
+        units(holds),
+      ])
       now += 24 * HOUR
       expect(outcome(await processor.execute(request), "authorize").balance.remaining).toBe(
         units(holds - 1)
@@ -809,11 +1207,16 @@ describe("BudgetDO alarm", () => {
         type: "record",
         idempotencyKey: "late",
         occurredAt: closesAt,
-        amount: units(1),
+        usage: amountUsage(units(1)),
       } as const
       outcome(await processor.execute(late), "record")
-      await expect(state.storage.getAlarm()).resolves.toBe(now + 25 * HOUR)
-      now += 25 * HOUR
+      const recordedAt = now
+      // The alarm first exports the row, then waits for its retention.
+      await expect(state.storage.getAlarm()).resolves.toBe(now + JOURNAL_EXPORT_DELAY_MS)
+      now += JOURNAL_EXPORT_DELAY_MS
+      await processor.alarm()
+      await expect(state.storage.getAlarm()).resolves.toBe(recordedAt + 25 * HOUR)
+      now = recordedAt + 25 * HOUR
       await processor.alarm()
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
@@ -831,6 +1234,57 @@ describe("BudgetDO alarm", () => {
     await evictDurableObject(stub)
     expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
   })
+
+  it.each(["open", "sealed"] as const)(
+    "keeps a closed budget with an unfinished %s statement until completion",
+    async (statementState) => {
+      const key = `customer:unfinished-${statementState}`
+      const stub = stubFor(key)
+      const start = midMonthAhead()
+      const end = start + HOUR
+      const deletable = end + CLOSED_BUDGET_RETENTION_MS
+      const destroyed: number[] = []
+      let now = start
+      await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+        await migrate(drizzle(state.storage), migrations)
+        const processor = realStorageProcessor(state, () => now, [], destroyed)
+        outcome(await processor.execute(upsert(key, { ...fiftyPerMonth, closesAt: end })), "upsert")
+        const period = {
+          periodId: "period",
+          statementKey: "invoice",
+          featureSlug: "api_calls",
+          start,
+          end,
+        }
+        outcome(
+          await processor.execute({ type: "registerStatements", statements: [period] }),
+          "registerStatements"
+        )
+        now = deletable
+        if (statementState === "sealed") {
+          outcome(
+            await processor.execute({ type: "sealStatements", statementKey: "invoice", at: end }),
+            "sealStatements"
+          )
+        }
+        await processor.alarm()
+        expect(destroyed).toEqual([])
+        await expect(state.storage.getAlarm()).resolves.toBe(now + UNFINISHED_BILLING_RECHECK_MS)
+        outcome(
+          await processor.execute({ type: "sealStatements", statementKey: "invoice", at: end }),
+          "sealStatements"
+        )
+        outcome(
+          await processor.execute({ type: "completeStatements", periodIds: [period.periodId] }),
+          "completeStatements"
+        )
+        now += UNFINISHED_BILLING_RECHECK_MS
+        await processor.alarm()
+        expect(destroyed).toEqual([now])
+        await expect(state.storage.getAlarm()).resolves.toBeNull()
+      })
+    }
+  )
 
   it("answers a deleted budget as never created, and an upsert starts it over", async () => {
     const key = "customer:closed-long-ago"
@@ -875,16 +1329,30 @@ describe("BudgetDO alarm", () => {
       )
       // No wake at the boundary: a counter rolls on the next command however late it comes.
       await expect(state.storage.getAlarm()).resolves.toBeNull()
-      await processor.execute({ type: "charge", idempotencyKey: "c0", amount: units(4) })
+      await processor.execute({
+        type: "charge",
+        idempotencyKey: "c0",
+        usage: amountUsage(units(4)),
+      })
 
       now = boundary + 5 * MINUTE
       const read = outcome(await processor.execute({ type: "get" }), "get")
       expect(read.history).toEqual([
-        { windowId: "hour", start: boundary - HOUR, end: boundary, consumed: units(4) },
+        {
+          windowId: "hour",
+          start: boundary - HOUR,
+          end: boundary,
+          consumed: amountUsage(units(4)),
+        },
       ])
       expect(read.budget.balance.limits[0]?.consumed).toBe(BigInt(0))
       expect(hourly("hour")).toEqual([
-        { window_id: "hour", start: boundary - HOUR, end: boundary, consumed: "400000000" },
+        {
+          window_id: "hour",
+          start: boundary - HOUR,
+          end: boundary,
+          consumed: JSON.stringify({ amount: { $bigint: "400000000" }, quantities: {} }),
+        },
       ])
 
       for (let i = 1; i <= 13; i++) {
@@ -892,7 +1360,7 @@ describe("BudgetDO alarm", () => {
         await processor.execute({
           type: "charge",
           idempotencyKey: `c${i}`,
-          amount: units(1),
+          usage: amountUsage(units(1)),
         })
       }
       // Thirteen periods rolled with usage (the empty one at `boundary` never rolls); the oldest went.
@@ -921,7 +1389,7 @@ describe("BudgetDO alarm", () => {
         type: "record",
         idempotencyKey: "evt_1",
         occurredAt: t0,
-        amount: units(4),
+        usage: amountUsage(units(4)),
       } as const
       expect(outcome(await processor.execute(request), "record").replayed).toBe(false)
       const rows = () => state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()
@@ -931,12 +1399,14 @@ describe("BudgetDO alarm", () => {
       await processor.alarm()
       expect(rows()).toEqual({ n: 1 })
       const replay = outcome(await processor.execute({ ...request, occurredAt: t0 + 1 }), "record")
-      expect([replay.replayed, replay.amount, replay.balance.remaining]).toEqual([
+      expect([replay.replayed, replay.usage, replay.balance.remaining]).toEqual([
         true,
-        units(4),
+        amountUsage(units(4)),
         units(46),
       ])
-      expect(rejection(await processor.execute({ ...request, amount: units(5) }))).toEqual({
+      expect(
+        rejection(await processor.execute({ ...request, usage: amountUsage(units(5)) }))
+      ).toEqual({
         code: "IDEMPOTENCY_CONFLICT",
         idempotencyKey: "evt_1",
       })
@@ -951,6 +1421,7 @@ describe("BudgetDO alarm", () => {
   it("propagates a failed attempt to re-arm after a sweep error", async () => {
     const errors: string[] = []
     const processor = new BudgetProcessor({
+      journal: discardJournal,
       runtime: { destroy: async () => {} },
       clock: { now: () => Date.now() },
       logger: { error: (message) => errors.push(message) },
@@ -979,6 +1450,7 @@ describe("BudgetDO alarm", () => {
       await instance.execute(upsert(key, fiftyPerMonth))
       const errors: string[] = []
       const processor = new BudgetProcessor({
+        journal: discardJournal,
         runtime: { destroy: async () => {} },
         clock: { now: () => t0 },
         logger: { error: (message, fields) => errors.push(`${message}: ${fields.error}`) },
@@ -1014,7 +1486,7 @@ describe("BudgetDO creates a budget on first use", () => {
       await stub.execute({
         type: "authorize",
         idempotencyKey: "a1",
-        amount: units(10),
+        usage: amountUsage(units(10)),
         ifMissing: definitionOf(key, fiftyPerMonth),
       }),
       "authorize"
@@ -1027,7 +1499,7 @@ describe("BudgetDO creates a budget on first use", () => {
       await stub.execute({
         type: "authorize",
         idempotencyKey: "a2",
-        amount: units(5),
+        usage: amountUsage(units(5)),
         ifMissing: looser,
       }),
       "authorize"
@@ -1048,7 +1520,7 @@ describe("BudgetDO creates a budget on first use", () => {
         await stub.execute({
           type: "authorize",
           idempotencyKey: "a1",
-          amount: units(100),
+          usage: amountUsage(units(100)),
           ifMissing: definitionOf(key, fiftyPerMonth),
         })
       )

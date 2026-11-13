@@ -1,6 +1,6 @@
 "use client"
 
-import { INTERVAL_KEYS, type Interval, prepareInterval } from "@unprice/analytics"
+import { INTERVAL_KEYS, type Interval, prepareInterval } from "@unprice/db/validators"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { cn } from "@unprice/ui/utils"
 import { Calendar } from "lucide-react"

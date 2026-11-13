@@ -14,7 +14,7 @@ import {
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
+import { requestBudgetCommandDeps } from "~/ingestion/budget/deps"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
@@ -27,7 +27,7 @@ export const route = createRoute(
       operationId: "access.entitlements.current",
       summary: "get current customer entitlements",
       description:
-        "Get all active customer entitlements. Metered entitlements include live usage state from their entitlement windows.",
+        "Get all active customer entitlements. Metered entitlements include their live limit, usage, and billing-period spend from the customer's subscription budget.",
       method: "post",
       tags,
       request: {
@@ -93,10 +93,7 @@ export const registerGetCurrentEntitlementsV1 = (app: App) =>
     const result = await getCustomerCurrentEntitlements(
       {
         entitlements: entitlement,
-        entitlementWindowClient: new CloudflareEntitlementWindowClient({
-          APP_ENV: c.env.APP_ENV,
-          entitlementwindow: c.env.entitlementwindow,
-        }),
+        budgets: requestBudgetCommandDeps(c).budgets,
         logger: c.get("logger"),
         now: () => requestStartedAt,
       },

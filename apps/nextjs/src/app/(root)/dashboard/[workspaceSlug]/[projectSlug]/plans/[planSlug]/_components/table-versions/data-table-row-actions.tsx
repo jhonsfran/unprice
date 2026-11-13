@@ -1,5 +1,7 @@
 "use client"
 
+import { PlanVersionPublish } from "~/components/pricing/plan-version-publish"
+
 import type { Row } from "@tanstack/react-table"
 
 import { planSelectBaseSchema, planVersionSelectBaseSchema } from "@unprice/db/validators"
@@ -28,7 +30,6 @@ import { SuperLink } from "~/components/super-link"
 import {
   PlanVersionDeactivate,
   PlanVersionDuplicate,
-  PlanVersionPublish,
 } from "../../../_components/plan-version-actions"
 import { PlanVersionForm } from "../plan-version-form"
 

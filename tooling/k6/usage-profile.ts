@@ -5,11 +5,12 @@ type EntitlementList = NonNullable<
   Awaited<ReturnType<K6SdkClient["access"]["entitlements"]["list"]>>["result"]
 >
 type Entitlement = EntitlementList[number]
+type MeterConfig = NonNullable<Entitlement["featurePlanVersion"]["meterConfig"]>
 
 export type UsageEventTarget = {
   eventSlug: string
   featureSlug: string
-  aggregationMethod: string
+  aggregationMethod: MeterConfig["aggregationMethod"]
   aggregationField: string | null
   propertyFields: string[]
 }
@@ -152,7 +153,7 @@ function getFeatureSlug(entitlement: Entitlement): string | null {
 
 function getMeterConfig(entitlement: Entitlement): {
   eventSlug: string
-  aggregationMethod: string
+  aggregationMethod: MeterConfig["aggregationMethod"]
   aggregationField: string | null
 } | null {
   const meterConfig = entitlement?.featurePlanVersion?.meterConfig
@@ -169,7 +170,7 @@ function getMeterConfig(entitlement: Entitlement): {
 
   return {
     eventSlug,
-    aggregationMethod: trimString(meterConfig.aggregationMethod) || "count",
+    aggregationMethod: meterConfig.aggregationMethod,
     aggregationField: trimString(meterConfig.aggregationField),
   }
 }

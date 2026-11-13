@@ -29,7 +29,6 @@
     "@unprice/db": "workspace:^",
     "@unprice/config": "workspace:^",
     "@unprice/error": "workspace:^",
-    "@unprice/analytics": "workspace:^",
     "evlog": "2.4.1",
     "next": "15.5.28",
     "next-auth": "5.0.0-beta.32",

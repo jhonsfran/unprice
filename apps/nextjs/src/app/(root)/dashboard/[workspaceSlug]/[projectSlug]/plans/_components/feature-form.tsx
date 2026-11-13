@@ -7,6 +7,7 @@ import { z } from "zod"
 import { slugify } from "@unprice/db/utils"
 import type { InsertFeature } from "@unprice/db/validators"
 import { featureInsertBaseSchema } from "@unprice/db/validators"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {
   Form,
@@ -26,13 +27,22 @@ import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
+import { MeterTemplateField } from "./meter-template-field"
+
+export type CreatedFeature = RouterOutputs["features"]["create"]["feature"]
 
 export function FeatureForm({
   setDialogOpen,
   defaultValues,
+  onCreated,
+  onUpdated,
 }: {
   setDialogOpen?: (open: boolean) => void
   defaultValues: InsertFeature
+  /** Called with the saved feature after a create; an edit never calls it. */
+  onCreated?: (feature: CreatedFeature) => void
+  /** Called with the saved feature after an edit, so a list showing it can follow. */
+  onUpdated?: (feature: CreatedFeature) => void
 }) {
   const router = useRouter()
   const trpc = useTRPC()
@@ -61,7 +71,7 @@ export function FeatureForm({
 
   const form = useZodForm({
     schema: forSchema,
-    defaultValues,
+    defaultValues: { ...defaultValues, meterConfig: defaultValues.meterConfig ?? null },
   })
 
   const createFeature = useMutation(
@@ -74,6 +84,7 @@ export function FeatureForm({
         toastAction("saved", "Feature created")
         setDialogOpen?.(false)
         router.refresh()
+        onCreated?.(feature)
       },
     })
   )
@@ -86,6 +97,7 @@ export function FeatureForm({
           queryKey: trpc.features.searchBy.queryKey(),
         })
         toastAction("updated", "Feature saved")
+        onUpdated?.(feature)
 
         setDialogOpen?.(false)
         // Only needed when the form is inside a uncontrolled dialog - normally updates
@@ -212,6 +224,21 @@ export function FeatureForm({
                     placeholder="Grants customers access to custom domains."
                   />
                 </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="meterConfig"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Measured by</FormLabel>
+                <FormDescription>
+                  The event this feature counts. A plan that meters the feature starts from it.
+                </FormDescription>
+                <MeterTemplateField value={field.value ?? null} onChange={field.onChange} />
                 <FormMessage />
               </FormItem>
             )}

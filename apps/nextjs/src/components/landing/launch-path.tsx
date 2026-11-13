@@ -13,12 +13,16 @@ import { StationHeader } from "./station-header"
 const RESERVATION_SNIPPET = `import { generateText } from "ai"
 import { Unprice } from "@unprice/api"
 
-const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN })
+const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! })
+// The first call creates a standalone cap: $5 a month.
+// This cap does not move wallet funds or create invoice usage.
+const budget = unprice.budget(\`customer:\${customerId}\`, {
+  ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
+})
 
-// 1. Reserve the most this model call may cost.
-const { result: reservation, error } = await unprice.reservations.reserve({
-  customerId,
-  maximumAmountMinor: 10, // $0.10 ceiling, held against the customer's budget
+// 1. Hold the most this model call may cost.
+const { result: authorization, error } = await budget.authorize({
+  amount: "0.10", // $0.10 ceiling, held against the $5 cap
   idempotencyKey: messageId,
 })
 
@@ -26,27 +30,22 @@ const { result: reservation, error } = await unprice.reservations.reserve({
 if (error) {
   return new Response("Customer budget unavailable", { status: 402 })
 }
-if (!reservation.allowed) {
+if (!authorization.allowed) {
   return new Response("Customer budget unavailable", { status: 402 })
 }
+if (authorization.replayed) {
+  return new Response("Recover the existing request before starting more work", { status: 409 })
+}
 
-// 2. Spend only after the reservation succeeds.
+// 2. Spend only after the hold succeeds.
 const generation = await generateText({
   model,
   prompt,
   maxOutputTokens: 2_000,
 })
 
-// 3. Capture actual usage and release the unused amount.
-const settlement = await reservation.settle({
-  featureSlug: "ai-output-tokens",
-  eventSlug: "completions",
-  id: messageId,
-  properties: {
-    inputTokens: generation.usage.inputTokens,
-    outputTokens: generation.usage.outputTokens,
-  },
-})
+// 3. Settle the actual cost and release the unused amount.
+const settlement = await authorization.hold.settle({ amount: costOf(generation.usage) })
 
 if (settlement.error) throw settlement.error
 
@@ -69,7 +68,7 @@ const stages = [
     title: "Reserve",
     body: "Hold the maximum cost before the provider call.",
     facts: [
-      { label: "customer", fact: "funds the work" },
+      { label: "customer", fact: "key for this cap" },
       { label: "held", fact: "$0.10 maximum" },
       { label: "denied", fact: "no provider call" },
     ],
@@ -89,7 +88,7 @@ const stages = [
     facts: [
       { label: "captured", fact: "actual usage" },
       { label: "released", fact: "unused hold" },
-      { label: "evidence", fact: "usage → invoice" },
+      { label: "evidence", fact: "budget journal" },
     ],
   },
 ]

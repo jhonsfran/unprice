@@ -66,6 +66,8 @@ export interface WalletTransferInput {
 export type ReservationOwner =
   | { type: "entitlement_window"; id: string }
   | { type: "agent_run"; id: string }
+  /** A prepaid budget's reservation for one statement key (ADR-0008 D10). */
+  | { type: "budget"; id: string }
 
 export interface CreateReservationInput {
   projectId: string

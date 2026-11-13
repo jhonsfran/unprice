@@ -47,7 +47,7 @@ after fixing the wording.
    trace the decision to the invoice.
 3. Prefer mechanism over adjective. Say what Unprice checks, reserves, rejects, captures, replays,
    or explains.
-4. Use exact product nouns. `plan version`, `wallet credit`, `entitlement`, `budgeted run`,
+4. Use exact product nouns. `plan version`, `wallet credit`, `entitlement`, `budget key`,
    `invoice evidence`, and `meter event` are different things.
 5. Distinguish business decisions from system failures. A denial is not a crash.
 6. Make the buyer the builder. The buyer is `you`, `team`, or `builder`; the buyer's economic actor
@@ -94,7 +94,7 @@ Bad:
 | `customer` | The buyer's end customer and economic actor | Dashboard, API docs, invoices, wallets, subscriptions | Calling the Unprice buyer a customer |
 | `account` | A customer when the economic/account container matters | Support, sales, account-level budget copy | Using when `customer` is clearer |
 | `user` | A human in the buyer's app, only when distinct from the customer | Rare docs examples | Generic substitute for buyer or customer |
-| `workload` | Generic unit of expensive work under a customer | Budgeted runs, docs, dashboard | Treating Unprice as the workload owner |
+| `workload` | Generic unit of expensive work under a customer | Budget keys, docs, dashboard | Treating Unprice as the workload owner |
 | `agent`, `job`, `workflow`, `tool`, `run` | Workload labels from the buyer's system | Examples and filters | "AI agent platform" |
 
 Rule: never call the Unprice buyer "the customer." In Unprice copy, `customer` means the buyer's
@@ -111,13 +111,13 @@ economic actor that holds subscriptions, budgets, wallets, and invoices.
 | `customer money path` | `revenue flow` | The inspectable path from customer spend decision to invoice evidence. |
 | `customer spend authorization` | `pricing control engine` | Mechanism: deciding whether paid customer work is commercially allowed. |
 | `paid action` | `monetized action` | Broad product action that may be entitled, metered, budgeted, credited, or invoiced. |
-| `budgeted run` | `agent run` as the generic term | Agents are one possible workload label. |
+| `budget key` | `run ID` as an Unprice object | The application can use its own run ID as a key. |
 | `wallet credit` | `credit` when ambiguous | Credits are wallet funds, not entitlement grants. |
 | `entitlement grant` | `credit` | Grants define access/quantity; credits fund spend. |
 | `invoice evidence` | `analytics` when evidence is meant | Evidence explains charges and denials. |
 | `Sandbox` | `sandbox` when naming the provider | Capitalize the built-in payment provider mode. |
 | `Stripe-first today` | `Stripe replacement` | Payment provider boundary. |
-| `run it in your own Cloudflare account` | unqualified `self-host`, `runs anywhere` | Hosting boundary: the runtime deploys to the buyer's own Cloudflare account (Workers, Durable Objects, Queues). |
+| `run it in your own Cloudflare account` | unqualified `self-host`, `runs anywhere` | Hosting boundary: the runtime deploys to the buyer's own Cloudflare account (Workers, Durable Objects, Pipelines). |
 | `AGPL-3.0` | `AGPL` only | Use full license name on first mention. |
 | `SDK`, `API`, `OpenAPI` | `Sdk`, `api` in headings | Keep developer acronyms uppercase. |
 
@@ -138,16 +138,16 @@ Use these nouns consistently.
 | `plan version` | Publishable version of a plan that customers can be pinned to | "Keep customers on the plan version they bought." |
 | `feature` | Sellable or gateable capability in a plan | "Attach meter configuration to usage features." |
 | `meter` | Configuration for turning events into usage facts | "Meter usage by event slug." |
-| `event` | Reported usage occurrence | "Replay failed ingestion events." |
+| `event` | Reported usage occurrence | "Inspect processed and rejected usage events." |
 | `entitlement` | Customer's right or limit for a feature | "Check entitlement before expensive work runs." |
 | `budget` | Spend cap for a customer or workload | "Reject over-budget customer work before it runs." |
-| `budgeted run` | Temporary budget reservation and spend label for a workload | "Start a budgeted run for a job, workflow, tool, or agent." |
+| `budget key` | Application-defined identifier for a standalone spend cap | "Use a budget key to cap a job, workflow, tool, or agent." |
 | `wallet` | Customer-level balance container | "Reserve wallet credits before capturing usage." |
 | `wallet credit` | Purchased or granted spend unit in the wallet | "Show purchased, granted, reserved, and consumed credits separately." |
 | `invoice` | Billable customer document | "Explain invoice lines from rated facts and ledger captures." |
 | `ledger capture` | Evidence that reserved wallet funds were consumed | "Group invoice evidence from ledger captures." |
-| `ingestion` | Pipeline that receives and processes usage events | "Show processed, rejected, failed, and replayable events." |
-| `replay` | Queue a failed event for processing again | "Replay failed events from stored payloads." |
+| `ingestion` | Pipeline that receives and processes usage events | "Show processed and rejected journal events." |
+| `replay` | Return the prior result for the same idempotency key | "A duplicate request replays its first result." |
 | `payment provider` | System that captures payment | "Stripe-first today, provider-extensible by design." |
 
 ## Verb System
@@ -164,13 +164,13 @@ These are the primary Unprice verbs.
 | `reserve` | Hold wallet funds before usage is final | "Reserve credits before the run starts." |
 | `capture` | Consume reserved funds after usage happens | "Capture usage against the reservation." |
 | `consume` | Synchronously apply usage | "Consume usage while the request is in flight." |
-| `record` | Asynchronously report usage | "Record usage events for async ingestion." |
+| `record` | Apply reported past usage without a limit gate | "Send an events batch with occurredAt and inspect per-event results." |
 | `allow` | Let a request continue | "Allow within budget." |
 | `deny` | Stop a runtime request from continuing | "Deny over-budget work before it runs." |
 | `reject` | Refuse an event or action as a business outcome | "Rejected because the customer exceeded budget." |
-| `fail` | System or pipeline failure | "Failed during rating." |
+| `fail` | System or pipeline failure | "Request failed before a budget decision." |
 | `explain` | Show evidence behind a charge, credit, denial, or decision | "Explain this invoice line." |
-| `replay` | Queue failed ingestion again | "Replay selected failed events." |
+| `replay` | Return an existing idempotent result | "A retry with the same key replays the original result." |
 | `retry` | Client repeats the same request safely | "Retry with the same idempotency key." |
 | `version` | Create a new plan state | "Version plans without rewriting the app." |
 | `publish` | Make a plan version usable | "Publish the plan version." |
@@ -200,15 +200,11 @@ Use state language as a contract.
 | `denied` | Runtime check stopped work | "Denied before any cost was created." | "Errored" |
 | `processed` | Event was accepted and applied | "Processed in the last hour." | "Completed" if ingestion state is `processed` |
 | `rejected` | Event/action was refused by business logic | "Rejected: budget exceeded." | "Failed" |
-| `failed` | System or pipeline could not complete | "Pipeline failure. Replay is available." | "Rejected" |
-| `replayable` | Failed event has a stored payload | "Replayable: yes." | "Retryable" in dashboard action labels |
-| `queued` | Replay or background work is scheduled | "Replay queued." | "Started" |
-| `running` | Budgeted run is active | "Run is still consuming budget." | "Live" when exact state is available |
-| `completed` | Run ended normally | "Completed after wallet capture." | "Closed" unless the state is named `closed` |
-| `budget_exceeded` | Run stopped at budget | "Budget exceeded." | "Out of funds" if the budget, not wallet, is the cause |
+| `failed` | A request or system operation could not complete | "Request failed. Retry with the same idempotency key." | An ingestion state; journal events are processed or rejected |
+| `BUDGET_EXCEEDED` | A hard limit or prepaid wallet denied spending | "Budget exceeded." | A successful consume result with allowed false |
 | `reserved` | Wallet funds are held | "Reserved for active usage." | "Spent" |
 | `consumed` | Funds or usage have been spent/applied | "Already spent from the wallet." | "Used" when money semantics matter |
-| `expired` | Credit or run is no longer valid by time | "Expired wallet credit." | "Inactive" |
+| `expired` | Credit or hold is no longer valid by time | "Expired wallet credit." | "Inactive" |
 | `draft` | Not publishable/live yet | "Draft plan version." | "Pending" |
 | `published` | Plan version can be used | "Published plan version." | "Active" when publish state matters |
 | `finalized` | Invoice is locked | "Finalized invoice." | "Done" |
@@ -275,11 +271,11 @@ affected, what limit or balance was involved, and what the operator can do next.
 
 Use:
 
-- "Processed", "Rejected", "Failed", "Replayable".
-- "Budgeted runs for this customer."
+- "Processed" and "Rejected" for journal events.
+- "Budget keys for this customer."
 - "Wallet credits for this customer."
 - "Why this costs $X."
-- "Replay selected failed events."
+- "Inspect rejected event payloads."
 - "Create a customer or send one through the API to start recording usage."
 
 Avoid:
@@ -299,7 +295,7 @@ Use:
 
 - "Call `access.check` before the paid action runs."
 - "Use `usage.consume` when the request path needs a synchronous decision."
-- "Use `usage.record` for async usage ingestion."
+- "Use `usage.record` for past usage. Inspect each event result."
 - "Publish a plan version before customer signup."
 - "Retry with the same idempotency key."
 - "A bound API key cannot spend for a different customer."
@@ -308,7 +304,7 @@ Avoid:
 
 - "Simply", "just", or "easily" when money logic is involved.
 - "Magic", "automatic" without naming what is derived.
-- "Get insights" for evidence or replay workflows.
+- "Get insights" for evidence workflows.
 
 ### API Reference And SDK Examples
 
@@ -317,9 +313,9 @@ API copy should describe the contract, not the marketing benefit.
 Use:
 
 - "Authorize customer spend."
-- "Start a budgeted run."
-- "Apply usage to a running budgeted run."
-- "End a budgeted run and release unused reservation funds."
+- "Authorize a maximum amount on a budget key."
+- "Settle actual usage within the authorized amount."
+- "Release a hold only when no usage occurred."
 - "Resolve whether a feature is usable for a customer."
 - "Return the current wallet balance plus active holds and credits."
 
@@ -358,7 +354,7 @@ Good:
 
 - "No wallet credits. Wallet credits will appear after this customer receives purchased or granted
   funds."
-- "No budgeted runs. Runs will appear after your app starts a budgeted workload for this customer."
+- "No budget usage. Usage will appear after your app charges, records, or settles against this key."
 - "No invoices. Invoices will appear after this customer has billable subscriptions."
 - "No plan versions. Publish a plan version before assigning customers."
 
@@ -379,9 +375,9 @@ Pattern:
 Examples:
 
 - "Events could not be loaded. Refresh or narrow the date range."
-- "Pipeline failure. Replay is available from the stored payload."
+- "Request failed. Retry with the same idempotency key and original event time."
 - "Denied: budget exceeded. Increase the run budget or stop the workload."
-- "This failed event is not replayable, so no replay payload is stored."
+- "Rejected event payload is unavailable in the journal."
 
 Do not soften important money states. Be direct.
 
@@ -397,7 +393,7 @@ Primary CTAs should name the concrete first step.
 | GitHub/community | "Star on GitHub" | "Join us" |
 | Dashboard empty plan state | "Create plan" | "Launch model" |
 | Dashboard API sheet | "See API reference" | "Learn more" |
-| Events recovery | "Replay selected" | "Try again" |
+| Rejected event evidence | "Inspect payload" | "Try again" |
 | Invoice detail | "Explain charge" | "View insights" |
 | Payment setup | "Connect Stripe" | "Enable payments" when only Stripe is live |
 | Sandbox setup | "Test on Sandbox" | "Start taking payments" |
@@ -414,7 +410,7 @@ Examples:
 - "Map my paid action"
 - "Watch the workflow demo"
 - "Authorize customer spend"
-- "Replay selected"
+- "Inspect payload"
 - "Explain charge"
 - "Bind default customer"
 - "Rotate API key"
@@ -445,7 +441,7 @@ Examples:
 - Customers
 - Wallet & Credits
 - Invoices
-- Budgeted Runs
+- Budgets
 - API Keys
 - Plans
 - Plan Versions
@@ -460,7 +456,7 @@ Examples:
 - Authorize customer spend
 - Budget the expensive action
 - Explain the charge
-- Replay failed events
+- Inspect rejected events
 - Wallet credits by source
 - Customer spend state
 - Plan features and meters
@@ -469,12 +465,11 @@ Examples:
 
 - "Processed in the last hour."
 - "Rejected by entitlement, budget, or wallet rules."
-- "Failed during ingestion."
-- "Replay queued."
+- "Request failed before a journal result was returned."
 - "Reserved for active usage."
 - "Consumed from wallet credits."
 - "Budget exceeded."
-- "No replay payload is stored."
+- "No rejected payload is stored."
 
 ## Replacement Dictionary
 
@@ -484,7 +479,7 @@ Use this table when reviewing existing copy.
 | --- | --- | --- |
 | "Start pricing" | "Start with one paid action", "Map my paid action", "Authorize customer spend", "Budget my expensive action", or "Create plan" | Names the first valuable action. |
 | "Learn more" | "Explore the SDK", "Read the docs", "See API reference" | Says what the user gets. |
-| "Manage your customers" | "Create customers and inspect subscriptions, entitlements, wallets, invoices, and runs." | Shows customer as economic actor. |
+| "Manage your customers" | "Create customers and inspect subscriptions, entitlements, wallets, invoices, and budgets." | Shows customer as economic actor. |
 | "Revenue architecture" | "plans, plan versions, features, meters, and limits" | Uses product nouns. |
 | "Growth levers" | "plans, plan versions, features, meters, and budgets" | Avoids vague growth language. |
 | "Adaptive model" | "usage-based, tiered, package, or hybrid plan" | Specific pricing language. |
@@ -495,7 +490,7 @@ Use this table when reviewing existing copy.
 | "Verify entitlement" | "Check access" | Matches `access.check`. |
 | "Track usage" | "Record usage" or "Consume usage" | Usage is billing-relevant. |
 | "AI gateway for billing" | "customer money path for request-to-invoice evidence" | Keeps gateway cost controls distinct from customer spend authorization. |
-| "AI agent platform" | "budgeted runs for agents, jobs, workflows, tools, and custom workloads" | Avoids false category. |
+| "AI agent platform" | "budget keys for agents, jobs, workflows, tools, and custom workloads" | Avoids false category. |
 | "Stripe replacement" | "Stripe-first customer money path" | Preserves payment-provider boundary. |
 | "No-code pricing" | "pricing flexibility without rewriting the request path" | Audience is developer-led. |
 | "Magic billing" | "one inspectable money path" | Sage/Ruler, not Magician. |
@@ -546,7 +541,7 @@ Before:
 
 After:
 
-> Use the SDK to check access, record usage, start budgeted runs, and inspect customer money state.
+> Use the SDK to check access, record usage, authorize budget holds, and inspect customer money state.
 
 ### Feature Card
 
@@ -579,7 +574,7 @@ Allowed:
 - "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
-- "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
+- "Budget keys for agents, workflows, jobs, tools, and custom workloads."
 - "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "The money path is yours to read, fork, and run in your own Cloudflare account."

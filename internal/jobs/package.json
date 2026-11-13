@@ -24,7 +24,6 @@
     "@unprice/db": "workspace:^",
     "@unprice/observability": "workspace:^",
     "@unprice/services": "workspace:^",
-    "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
     "trigger.dev": "4.8.1",
     "zod": "^4.6.7"

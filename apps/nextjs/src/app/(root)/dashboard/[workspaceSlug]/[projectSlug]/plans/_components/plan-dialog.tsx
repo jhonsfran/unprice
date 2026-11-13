@@ -33,8 +33,9 @@ export function PlanDialog({
           <ResponsiveDialogTitle>{isEdit ? "Edit plan" : "Create plan"}</ResponsiveDialogTitle>
 
           <ResponsiveDialogDescription>
-            Define the commercial package. Plan versions carry the features, meters, limits, and
-            billing behavior.
+            {isEdit
+              ? "Update the commercial package. Plan versions keep the versioned features, meters, and billing behavior."
+              : "Define the commercial package. The plan starts with a draft version to configure: its features, prices, and billing live there."}
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 
@@ -47,6 +48,7 @@ export function PlanDialog({
               active: true,
               defaultPlan: false,
               enterprisePlan: false,
+              trialUnits: 0,
             }
           }
           setDialogOpen={setDialogOpen}

@@ -25,4 +25,19 @@ describe("customerSignUpSchema", () => {
 
     expect(result.success).toBe(false)
   })
+
+  it("bounds the attribution ids: no control characters, quotes, or unbounded length", () => {
+    const parse = (fields: Record<string, string>) =>
+      customerSignUpSchema.safeParse({ ...baseSignUpInput, ...fields }).success
+
+    expect(parse({ planVersionId: "8f14e45f-ceea-4e7a-9b1d-2f6a1c0b7d11", pageId: "page_1" })).toBe(
+      true
+    )
+    expect(parse({ pageId: "page\u0000" })).toBe(false)
+    expect(parse({ pageId: "page'1" })).toBe(false)
+    expect(parse({ pageId: "" })).toBe(false)
+    expect(parse({ planVersionId: "p".repeat(129) })).toBe(false)
+    expect(parse({ pageId: "page\n1" })).toBe(false)
+    expect(parse({ planVersionId: "pv 1" })).toBe(false)
+  })
 })

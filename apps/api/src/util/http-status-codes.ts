@@ -1,5 +1,4 @@
 export const OK = 200 as const
-export const ACCEPTED = 202 as const
 export const MOVED_TEMPORARILY = 302 as const
 export const SEE_OTHER = 303 as const
 export const BAD_REQUEST = 400 as const

@@ -58,6 +58,29 @@ describe("describeOperation", () => {
     ])
   })
 
+  it("reads an expired estimate as billed at its price, or unbilled when no statement took it", () => {
+    const expiry = {
+      status: "settled" as const,
+      closedAt: 61_000,
+      crossed: [],
+      byExpiry: true as const,
+    }
+    const priced = { slug: "image.generated", properties: {}, at: 1_000, features: [] }
+    const billed = describeOperation(
+      { ...hold, state: { ...expiry, actual: "0.04", priced } },
+      "money:USD"
+    )
+    const unbilled = describeOperation(
+      { ...hold, state: { ...expiry, actual: "3", unbilled: { reason: "PERIOD_CLOSED" } } },
+      "money:USD"
+    )
+
+    expect([billed.detail, unbilled.detail]).toEqual([
+      "0.04 of 3.00 held (expired, billed at its price)",
+      "3.00 (expired, unbilled: PERIOD_CLOSED)",
+    ])
+  })
+
   it("shows what an open lease has left and names a record by its idempotency key", () => {
     const lease = describeOperation(
       {

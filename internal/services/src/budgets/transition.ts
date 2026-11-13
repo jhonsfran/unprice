@@ -8,7 +8,11 @@
  * record), and the window history.
  */
 
+import { type BudgetPricing, CARD_REFRESH_MS } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
+import type { CardRows } from "../pricing"
+import { ownProperty } from "../pricing/resolve"
+import { balanceOf } from "./balance"
 import {
   type BudgetOperations,
   type BudgetRecord,
@@ -17,23 +21,39 @@ import {
   deletableAt,
   isClosed,
 } from "./config"
-import { type Change, balanceOf, decide, holdNumber } from "./decide"
+import { type Change, decide } from "./decide"
+import { decideFunding, fundingViolations, prepaidPayer } from "./funding"
+import { holdNumber } from "./holds"
 import { type RowStep, checkTransition } from "./invariants"
-import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
+import { alarmAt, consume, dueAt, rollUsage } from "./ledger"
+import { cardIdsOf, featuresOf } from "./meter"
 import type {
   BudgetBalance,
   BudgetCommand,
   BudgetOutcome,
   BudgetReply,
   BudgetView,
+  Funding,
+  FundingWork,
   LeaseOperation,
   LeaseView,
   Ledger,
   Operation,
   ReservationOperation,
-  UnPriceBudgetError,
+  Statement,
   WindowPeriod,
 } from "./model"
+import { type UnPriceBudgetError, reject } from "./rejections"
+import {
+  type PositionWrite,
+  byPeriodId,
+  movedPositions,
+  sealAnswer,
+  statementViolations,
+  statementsAnswer,
+} from "./statements"
+import { upsertFacts } from "./upsert"
+import { addUsage, subtractUsage } from "./usage"
 import { type WindowId, windowIdOf } from "./windows"
 
 const ZERO = BigInt(0)
@@ -53,14 +73,31 @@ export type BudgetReader = {
    * leases, holds by number.
    */
   readExpired(now: number, limit: number): ReservationOperation[]
+  /** Whether any hold or lease is open, expired or not. */
+  hasOpenReservations(): boolean
+  /** When each of these cards was last cached; a card the store has not cached is absent. */
+  cardsRefreshedAt(cardIds: readonly string[]): Record<string, number>
+  /** The cached rate cards with these ids; a card the store has not cached is absent. */
+  readCards(cardIds: readonly string[]): Record<string, CardRows>
+  /** The statements with these period ids. */
+  readStatements(periodIds: readonly string[]): Statement[]
+  /** Statements of these features that are open or overlap [from, to). */
+  readFeatureStatements(features: readonly string[], from: number, to: number): Statement[]
+  /** Every statement with this key, whatever its state. */
+  readKeyStatements(statementKey: string): Statement[]
+  /** Every open and sealed statement. */
+  readUnfinishedStatements(): Statement[]
+  /** The wallet reservations of these statement keys; a key without one is absent. */
+  readFunding(statementKeys: readonly string[]): Funding[]
 }
 
 /** The most expired reservations one sweep closes; the alarm comes back at once for the rest. */
 export const EXPIRED_PER_SWEEP = 256
 
 /**
- * Loads the addressed operation, the history a `get` returns, and the expired reservations a
- * `sweep` closes at the clock `transition` will clamp to.
+ * Loads the addressed operation, the history a `get` returns, the expired reservations a `sweep`
+ * closes at the clock `transition` will clamp to, and the cards and statements a command that
+ * prices or addresses statements needs.
  */
 export function loadView(
   reader: BudgetReader,
@@ -70,15 +107,178 @@ export function loadView(
   const ledger = reader.readLedger()
   const budget = reader.readBudget()
   const now = Math.max(clockMs, ledger.lastAt)
+  const target = targetOf(reader, command)
+  const upsert = command.type === "upsert" ? upsertFacts(command, budget) : null
+  const pricing = command.type === "upsert" ? upsert?.pricing : pricingOf(command, budget)
+  const expired =
+    command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : []
+  const prices =
+    pricing !== undefined &&
+    willPrice(command, budget, target, expired, now, upsert?.reprices ?? false)
+  // A pricing or unit change waits for open reservations (ADR-0008 D1).
+  const repriced = budget !== null && (upsert?.reprices ?? false)
+  const statements = statementsOf(
+    reader,
+    command,
+    prices ? pricing : undefined,
+    target,
+    expired,
+    now
+  )
   return {
+    funding: budget ? reader.readFunding(fundingKeysOf(command, budget, statements)) : [],
     budget,
     ledger,
-    target: targetOf(reader, command),
+    target,
     history:
       command.type === "get" && budget
         ? reader.readHistory(limitedWindows(budget), WINDOW_HISTORY_PERIODS)
         : [],
-    expired: command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : [],
+    expired,
+    cards: pricing && prices ? reader.readCards(cardIdsOf(pricing)) : {},
+    // The alarm's sweep cannot refresh cards. An expiry prices at its hold's createdAt, when the
+    // cards were fresh, and rows effective then were published before it (ADR-0008 D2 notice).
+    staleCards:
+      pricing && prices && command.type !== "sweep"
+        ? staleCardsOf(reader, cardIdsOf(pricing), now)
+        : [],
+    reservationsOpen: repriced && reader.hasOpenReservations(),
+    upsert,
+    // Several expiries may read the same statement.
+    statements: [...byPeriodId(statements).values()],
+  }
+}
+
+function staleCardsOf(reader: BudgetReader, cardIds: readonly string[], now: number): string[] {
+  const refreshedAt = reader.cardsRefreshedAt(cardIds)
+  return cardIds.filter((cardId) => {
+    const at = ownProperty(refreshedAt, cardId)
+    return at === undefined || now - at >= CARD_REFRESH_MS
+  })
+}
+
+/**
+ * The statement keys whose wallet reservations the command reads: the one a funding command or a
+ * seal addresses, and for a prepaid budget the keys of the statements an event reads.
+ */
+function fundingKeysOf(
+  command: BudgetCommand,
+  budget: BudgetRecord,
+  statements: readonly Statement[]
+): string[] {
+  switch (command.type) {
+    case "fund":
+    case "applyFunding":
+    case "sealStatements":
+      return [command.statementKey]
+  }
+  if (!prepaidPayer(budget)) return []
+  return [...new Set(statements.map((statement) => statement.statementKey))]
+}
+
+/** The pricing the command runs under: an upsert's, else the budget's or the one it creates. */
+function pricingOf(command: BudgetCommand, budget: BudgetRecord | null): BudgetPricing | undefined {
+  if (budget) return budget.config.pricing
+  return "ifMissing" in command ? command.ifMissing?.config.pricing : undefined
+}
+
+/**
+ * Whether the command reaches the cards: a create or an upsert that changes pricing checks them, an
+ * event is priced, an expired estimate is billed. A keyed replay and a settle of a closed hold
+ * answer from their row.
+ */
+function willPrice(
+  command: BudgetCommand,
+  budget: BudgetRecord | null,
+  target: Operation | null,
+  expired: readonly ReservationOperation[],
+  now: number,
+  reprices: boolean
+): boolean {
+  if (budget === null) return true
+  if (command.type === "upsert") return reprices
+  const live = target !== null && !isPastRetention(target, now)
+  switch (command.type) {
+    case "authorize":
+    case "charge":
+    case "record":
+      return command.event !== undefined && !live
+    case "settle":
+      return (
+        command.event !== undefined && target?.kind === "hold" && target.state.status === "open"
+      )
+    case "sweep":
+      return expired.some((row) => row.kind === "hold" && row.estimate !== undefined)
+    default:
+      return false
+  }
+}
+
+/**
+ * The statements a command reads. An event reads its features' open statements and those covering
+ * the time it prices at: a record's `occurredAt`, a settle's (or an expiry's) hold `createdAt`,
+ * else the clock. `pricing` is undefined when the command will not price.
+ */
+function statementsOf(
+  reader: BudgetReader,
+  command: BudgetCommand,
+  pricing: BudgetPricing | undefined,
+  target: Operation | null,
+  expired: readonly ReservationOperation[],
+  now: number
+): Statement[] {
+  const eventStatements = (slug: string, from: number, to: number) => {
+    const features = pricing ? featuresOf(pricing, slug).map((feature) => feature.slug) : []
+    return features.length === 0 ? [] : reader.readFeatureStatements(features, from, to)
+  }
+  switch (command.type) {
+    case "authorize":
+    case "charge":
+    case "record":
+    case "settle": {
+      const { event } = command
+      if (!event) return []
+      let at = now
+      if (command.type === "record") at = command.occurredAt
+      if (command.type === "settle") {
+        if (target?.kind !== "hold") return []
+        at = target.createdAt
+      }
+      return eventStatements(event.slug, at, at + 1)
+    }
+    case "sweep": {
+      // One read per event slug, over the span of its holds' times.
+      const spans = new Map<string, { from: number; to: number }>()
+      for (const row of expired) {
+        if (row.kind !== "hold" || !row.estimate) continue
+        const span = spans.get(row.estimate.slug)
+        spans.set(row.estimate.slug, {
+          from: Math.min(span?.from ?? row.createdAt, row.createdAt),
+          to: Math.max(span?.to ?? row.createdAt + 1, row.createdAt + 1),
+        })
+      }
+      return [...spans].flatMap(([slug, { from, to }]) => eventStatements(slug, from, to))
+    }
+    case "registerStatements": {
+      const { statements } = command
+      return [
+        ...reader.readStatements(statements.map((statement) => statement.periodId)),
+        ...statements.flatMap(({ featureSlug, start, end }) =>
+          reader.readFeatureStatements([featureSlug], start, end)
+        ),
+      ]
+    }
+    // A seal and a funding command read the whole key: a reservation closes once none is open.
+    case "sealStatements":
+    case "fund":
+    case "applyFunding":
+      return reader.readKeyStatements(command.statementKey)
+    case "completeStatements":
+      return reader.readStatements(command.periodIds)
+    case "statements":
+      return reader.readUnfinishedStatements()
+    default:
+      return []
   }
 }
 
@@ -124,6 +324,12 @@ export type BudgetTransition = Readonly<{
   periods: readonly WindowPeriod[]
   /** Anchored schedules whose inactive current period ended. */
   retiredWindows: readonly WindowId[]
+  /** Statements created or changed; the store upserts exactly these. */
+  statements: readonly Statement[]
+  /** The positions those statements moved; a store that keeps positions apart writes these. */
+  positions: readonly PositionWrite[]
+  /** Wallet reservations created or changed; the store upserts exactly these. */
+  funding: readonly Funding[]
   /**
    * Earliest `alarmAt` among the written rows, and a new config's `deletableAt`; the store only
    * ever lowers its alarm to it. A window boundary needs no wake: a counter keeps its period's
@@ -152,26 +358,34 @@ export function transition(params: {
   const limits = view.budget?.config.limits ?? []
   const rolled = rollUsage(view.ledger.usage, now, limits)
   const rolledLedger: Ledger = { ...view.ledger, usage: rolled.usage }
+  if (view.staleCards.length > 0) return reject({ code: "CARDS_STALE", cardIds: view.staleCards })
 
   const decided = decide(
     command,
-    { budget: view.budget, ledger: rolledLedger, target: live, expired: view.expired },
+    {
+      budget: view.budget,
+      ledger: rolledLedger,
+      target: live,
+      expired: view.expired,
+      cards: view.cards,
+      statements: view.statements,
+      reservationsOpen: view.reservationsOpen,
+      upsert: view.upsert,
+    },
     now
   )
   if (decided.err) return Err(decided.err)
   const change = decided.val
 
   const budget = change.configured?.budget ?? view.budget
-  const usage = change.configured
-    ? trackLimits(rolledLedger.usage, change.configured.budget.config.limits, now)
-    : rolledLedger.usage
+  const usage = change.configured?.usage ?? rolledLedger.usage
   const ledger: Ledger = {
     lastAt: now,
     holdSeq: change.rows.reduce(
       (seq, row) => (row.kind === "hold" ? Math.max(seq, holdNumber(row.id)) : seq),
       rolledLedger.holdSeq
     ),
-    held: rolledLedger.held + change.held,
+    held: addUsage(rolledLedger.held, change.held),
     usage: consume(usage, change.consumed),
     operations: countCall(rolledLedger.operations, command, change),
   }
@@ -182,14 +396,37 @@ export function transition(params: {
   const priors = new Map<string, Operation>(view.expired.map((row) => [row.id, row]))
   if (live) priors.set(live.id, live)
 
-  const violations = checkTransition({
-    before: view.ledger,
-    after: ledger,
-    limits,
-    resultingLimits: budget?.config.limits ?? [],
-    steps: change.rows.map((row): RowStep => [priors.get(row.id), row]),
-    periods,
-  })
+  const fundingInput = {
+    command,
+    view,
+    budget,
+    change,
+    heldBefore: rolledLedger.held.amount,
+    now,
+  }
+  const funded = decideFunding(fundingInput)
+  if (funded.err) return Err(funded.err)
+  const funding = funded.val.rows
+
+  const statements = change.statements ?? []
+  const priorStatements = byPeriodId(view.statements)
+  const steps = change.rows.map((row): RowStep => [priors.get(row.id), row])
+  const violations = [
+    ...checkTransition({
+      before: view.ledger,
+      after: ledger,
+      limits,
+      resultingLimits: budget?.config.limits ?? [],
+      steps,
+      periods,
+      unitChanged: change.configured?.unitChanged ?? false,
+    }),
+    ...statementViolations({
+      steps: statements.map((s) => [priorStatements.get(s.periodId), s] as const),
+      rows: steps,
+    }),
+    ...fundingViolations({ input: fundingInput, heldAfter: ledger.held.amount, rows: funding }),
+  ]
   if (violations.length > 0) {
     throw new Error(`budget transition breaks invariants: ${violations.join("; ")}`)
   }
@@ -204,6 +441,8 @@ export function transition(params: {
   const write =
     budget !== null &&
     (operations.length > 0 ||
+      statements.length > 0 ||
+      funding.length > 0 ||
       periods.length > 0 ||
       rolled.retired.length > 0 ||
       change.configured !== undefined ||
@@ -218,6 +457,9 @@ export function transition(params: {
     operations,
     periods,
     retiredWindows: rolled.retired,
+    statements,
+    positions: statements.flatMap((s) => movedPositions(priorStatements.get(s.periodId), s)),
+    funding,
     wakeAt,
     ...replyOf(command, {
       budget,
@@ -227,6 +469,9 @@ export function transition(params: {
       changes: change.configured?.changes ?? [],
       created: change.configured !== undefined && command.type !== "upsert",
       history: [...periods, ...view.history],
+      statements: [...byPeriodId([...view.statements, ...statements]).values()],
+      work: funded.val.work,
+      fundingReplayed: funded.val.replayed,
       now,
     }),
   })
@@ -242,7 +487,17 @@ function countCall(
   command: BudgetCommand,
   change: Pick<Change, "rows" | "configured" | "row">
 ): BudgetOperations {
-  if (command.type === "get" || command.type === "sweep") return operations
+  switch (command.type) {
+    case "get":
+    case "sweep":
+    case "statements":
+    case "registerStatements":
+    case "sealStatements":
+    case "completeStatements":
+    case "fund":
+    case "applyFunding":
+      return operations
+  }
   if (change.rows.length === 0 && change.configured === undefined) return operations
   if (refusalOf(change.row)) return operations
   return { ...operations, [command.type]: operations[command.type] + 1 }
@@ -269,6 +524,12 @@ type OutcomeParams = Readonly<{
   created: boolean
   /** This transition's periods, then the stored ones. */
   history: readonly WindowPeriod[]
+  /** The statements the command read, with its writes applied. */
+  statements: readonly Statement[]
+  /** Funding intents pending after the command, for a funding command or a seal. */
+  work: readonly FundingWork[]
+  /** An `applyFunding` for an intent already applied. */
+  fundingReplayed: boolean
   now: number
 }>
 
@@ -302,10 +563,27 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
         budget: snapshotOf(budget, ledger, balance, now),
         history: historyOf(budget, params.history),
       }
+    case "statements":
+    case "registerStatements":
+    case "completeStatements":
+      return {
+        type: command.type,
+        statements: statementsAnswer(command, params.statements, now),
+      }
+    case "sealStatements":
+      return {
+        type: command.type,
+        ...sealAnswer(command, params.statements, now),
+        funding: params.work,
+      }
+    case "fund":
+      return { type: "fund", funding: params.work }
+    case "applyFunding":
+      return { type: "applyFunding", funding: params.work, replayed: params.fundingReplayed }
     case "authorize": {
       if (row?.kind !== "hold") throw new Error("authorize produced no hold row")
-      const { id: holdId, amount, expiresAt } = row
-      return { type: "authorize", holdId, amount, expiresAt, replayed, balance, created }
+      const { id: holdId, reserved, expiresAt } = row
+      return { type: "authorize", holdId, reserved, expiresAt, replayed, balance, created }
     }
     case "charge":
     case "record": {
@@ -313,7 +591,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
         throw new Error(`${command.type} produced no ${command.type} row`)
       return {
         type: command.type,
-        amount: row.amount,
+        usage: row.usage,
         crossed: row.crossed,
         replayed,
         balance,
@@ -324,7 +602,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
       if (row?.kind !== "hold" || row.state.status !== "released") {
         throw new Error(`release of ${command.holdId} produced no released row`)
       }
-      return { type: "release", holdId: row.id, released: row.amount, replayed, balance }
+      return { type: "release", holdId: row.id, released: row.reserved, replayed, balance }
     }
     case "settle": {
       if (row?.kind !== "hold" || row.state.status !== "settled") {
@@ -335,7 +613,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
         type: "settle",
         holdId: row.id,
         actual,
-        released: row.amount - actual,
+        released: subtractUsage(row.reserved, actual),
         expired: closedAt >= row.expiresAt,
         crossed,
         replayed,

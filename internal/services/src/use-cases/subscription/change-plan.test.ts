@@ -102,6 +102,7 @@ function createDeps(overrides?: {
       services: {
         billing: {
           generateBillingPeriods,
+          syncPayerBudget: async () => {},
         },
         plans: {
           getPlanVersionByIdRecord,

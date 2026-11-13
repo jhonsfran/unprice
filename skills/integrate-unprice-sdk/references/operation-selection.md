@@ -12,13 +12,13 @@ similarity.
 | Compare Unprice with existing logic in shadow | `access.check` | No | No |
 | Enforce a known usage amount before work runs | `usage.consume` | Yes | Yes |
 | Report usage for metering and invoice evidence | `usage.record` | No | Yes, asynchronously |
-| Reserve a budget for multi-step work | `runs.start` / `runs.consume` / `runs.end` | Yes | Yes |
+| Hold a maximum before variable-cost or multi-step work | `budget(key).authorize` / `spend` | Yes | Yes |
 | Provision a customer from a published plan | `customers.signUp` | Not a runtime gate | Yes |
 
 Use this shorthand:
 
 > `check` asks. `consume` decides and applies known usage now. `record` reports what happened.
-> `runs` reserve before a variable-cost workload starts.
+> A budget hold reserves a maximum before variable-cost work starts.
 
 ## `access.entitlements.current`
 
@@ -83,52 +83,38 @@ The SDK invocation still performs network I/O and can return an error. Use the h
 existing background-task or after-response mechanism when the request must not wait; do not invent
 an unreliable fire-and-forget promise.
 
-## Budgeted runs
+## Budgets
 
-Use `runs.start`, `runs.consume`, and `runs.end` when a workload has multiple billable steps or an
-uncertain final cost.
-
-Choose runs for:
-
-- agents and tool chains;
-- workflows and multi-step jobs;
-- long-running tasks;
-- nested or iterative work that needs an up-front budget envelope.
+Use a budget when a paid action has an uncertain final cost or several billable steps: agents and
+tool chains, workflows, long-running tasks, and nested work that needs an up-front cap.
 
 Follow the lifecycle:
 
-1. Call `runs.start` before paid work.
-2. Continue only when the returned run is `running`.
-3. Call `runs.consume` as billable steps spend the reservation.
-4. Stop the workload when consumption is rejected.
-5. Call `runs.end` in `finally` to release unused funds.
-6. End as `failed` after exceptions or rejected consumption.
+1. Create the cap once with `budgets.upsert` (a workload's own key takes `closesAt`).
+2. Before each paid step, hold its maximum with `budget(key).authorize`, or wrap the step in
+   `budget(key).spend`.
+3. Continue only when the hold is allowed.
+4. Settle the hold with the step's actual cost; release it only when the step produced no usage.
 
 ### Hard caps for AI and other variable-cost provider calls
 
-`runs.start` reserves the amount the application supplies. It cannot discover or limit the cost
-of a provider request that the application has not bounded. For a hard "do not create more cost"
+A hold reserves the amount the application supplies. It cannot discover or limit the cost of a
+provider request that the application has not bounded. For a hard "do not create more cost"
 guarantee, make each provider call a finite proposed operation before it starts:
 
 1. Price the known input with the provider/model's actual pricing contract, including any fixed
    request overhead.
-2. Choose a maximum output that fits the remaining approved envelope and configure the provider
-   with that exact limit (for example, `maxTokens`).
-3. Start a run for that worst-case amount. Continue only when it is `running` with sufficient
-   remaining budget.
-4. Call the provider only with the matching cap, then consume the actual usage and end the run.
-5. Treat an unexpected rejected consumption as a fail-closed mismatch: end the run as `failed`,
-   log it, and do not start another paid step.
+2. Choose a maximum output that fits the remaining budget and configure the provider with that
+   exact limit (for example, `maxTokens`).
+3. Hold that worst-case amount. Continue only when the hold is allowed.
+4. Call the provider only with the matching cap, then settle the actual cost.
+5. Treat a settle above the hold as a fail-closed mismatch: log it and do not start another paid
+   step.
 
-For chat, a per-message run is usually the clearest authorization boundary. Its budget must be
-the lesser of the customer's remaining allowance and the conversation's remaining allowance.
-The application must atomically reserve that conversation allowance before calling the provider;
-separate message runs otherwise protect only the customer's total wallet, not a per-conversation
-cap. If the host cannot calculate a safe upper bound for the model, tool, or provider request,
-deny it before execution or accept that the action is metering-only rather than hard-capped.
+If the host cannot calculate a safe upper bound for the model, tool, or provider request, deny it
+before execution or accept that the action is metering-only rather than hard-capped.
 
-Do not use a run as a customer identity. The customer remains the economic actor; the run labels
-and bounds the workload.
+The customer remains the economic actor; a workload's budget key bounds the workload.
 
 ## Customer provisioning
 

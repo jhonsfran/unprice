@@ -1,6 +1,9 @@
-import { type Interval, analyticsIntervalSchema } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { paymentProviderSchema } from "@unprice/db/validators"
+import {
+  type Interval,
+  analyticsIntervalSchema,
+  paymentProviderSchema,
+} from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
@@ -13,9 +16,8 @@ import {
   getUsageDashboard,
   getUsageDashboardOutputSchema,
 } from "../analytics/get-usage-dashboard"
-import type { GetUsageDashboardAnalytics } from "../analytics/get-usage-dashboard"
 import {
-  type GetCustomerCurrentAccessAnalytics,
+  type CurrentEntitlementsReader,
   getCustomerCurrentAccess,
   getCustomerCurrentAccessOutputSchema,
 } from "../customer/get-current-access"
@@ -105,9 +107,10 @@ export class GetWorkspaceBillingOverviewError extends DomainError<{
 }
 
 export type GetWorkspaceBillingOverviewDeps = {
-  services: Pick<ServiceContext, "customers" | "wallet">
+  services: Pick<ServiceContext, "customers" | "wallet" | "budgetJournal">
   db: Database
-  analytics: GetCustomerCurrentAccessAnalytics & GetUsageDashboardAnalytics
+  /** Live metered usage from the payer budget, reached through the API. */
+  currentEntitlements: CurrentEntitlementsReader
   logger: Logger
   now?: () => number
 }
@@ -189,7 +192,7 @@ export async function getWorkspaceBillingOverview(
     getCustomerCurrentAccess(
       {
         db: deps.db,
-        analytics: deps.analytics,
+        currentEntitlements: deps.currentEntitlements,
         logger: deps.logger,
         now: deps.now,
       },
@@ -213,8 +216,8 @@ export async function getWorkspaceBillingOverview(
     ),
     getUsageDashboard(
       {
-        analytics: deps.analytics,
-        db: deps.db,
+        budgetJournal: deps.services.budgetJournal,
+        customers: deps.services.customers,
         now: deps.now,
       },
       {

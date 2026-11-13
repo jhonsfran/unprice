@@ -3,65 +3,73 @@
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { GripVertical } from "lucide-react"
+import type { ReactNode } from "react"
 
+import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
+import { TableRow } from "@unprice/ui/table"
 import { cn } from "@unprice/ui/utils"
 
-import type { FeaturePlanProps } from "./feature-plan"
-import { FeaturePlan } from "./feature-plan"
-
-export function SortableFeature(props: FeaturePlanProps) {
-  const { setNodeRef, listeners, isDragging, attributes, transform, transition } = useSortable({
-    id: props.planFeatureVersion.featureId,
+/**
+ * A feature table row that can be dragged by its handle into a new order. The row is the sortable
+ * node; the handle alone carries the listeners, so the row's cells keep their own focus and keys.
+ */
+export function SortableFeatureRow({
+  planFeatureVersion,
+  disabled,
+  className,
+  children,
+}: {
+  planFeatureVersion: PlanVersionFeatureDragDrop
+  disabled?: boolean
+  className?: string
+  children: (handle: ReactNode) => ReactNode
+}) {
+  const {
+    setNodeRef,
+    setActivatorNodeRef,
+    listeners,
+    attributes,
+    isDragging,
+    transform,
+    transition,
+  } = useSortable({
+    id: planFeatureVersion.featureId,
     data: {
-      mode: props.mode,
-      planFeatureVersion: props.planFeatureVersion,
+      mode: "FeaturePlan",
+      planFeatureVersion,
     },
     attributes: {
-      roleDescription: props.mode,
+      roleDescription: "sortable feature",
     },
-    disabled: props.disabled,
-    // Only animate during active sort / right after a drop. New items added via "+ Add" should
-    // appear in place without sliding in.
+    disabled,
+    // Only animate during active sort or right after a drop; an attached feature appears in
+    // place without sliding in.
     animateLayoutChanges: ({ isSorting, wasDragging }) => isSorting || wasDragging,
   })
 
-  const style = {
-    transition,
-    transform: CSS.Translate.toString(transform),
-  }
-
-  // Library mode keeps the original structure; drag only applies to attached
-  // plan features.
-  if (props.mode === "Feature") {
-    return <FeaturePlan {...props} />
-  }
+  const handle = disabled ? null : (
+    <button
+      ref={setActivatorNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      className={cn(
+        "flex size-6 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors duration-150 ease-out hover:text-foreground active:cursor-grabbing",
+        isDragging && "cursor-grabbing text-foreground"
+      )}
+      aria-label={`Drag to reorder ${planFeatureVersion.feature.title}`}
+    >
+      <GripVertical className="size-3.5" strokeWidth={1.5} />
+    </button>
+  )
 
   return (
-    <FeaturePlan
-      ref={props.disabled ? undefined : setNodeRef}
-      style={style}
-      {...attributes}
-      isDragging={isDragging}
-      renderDragHandle={
-        props.disabled
-          ? undefined
-          : () => (
-              <button
-                type="button"
-                {...listeners}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-                className={cn(
-                  "flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground transition-colors hover:text-foreground active:cursor-grabbing",
-                  isDragging && "cursor-grabbing text-foreground"
-                )}
-                aria-label="Drag to reorder feature"
-              >
-                <GripVertical className="size-3.5" />
-              </button>
-            )
-      }
-      {...props}
-    />
+    <TableRow
+      ref={disabled ? undefined : setNodeRef}
+      style={{ transition, transform: CSS.Translate.toString(transform) }}
+      className={cn(isDragging && "relative z-10 bg-background-bgHover shadow-ambient", className)}
+    >
+      {children(handle)}
+    </TableRow>
   )
 }

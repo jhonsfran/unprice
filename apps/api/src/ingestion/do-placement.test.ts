@@ -4,11 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 import type { Env } from "~/env"
 import {
   DO_JURISDICTION,
-  DO_LOCATION_HINT,
   durableObjectJurisdiction,
   getBudgetStub,
-  getEntitlementWindowStub,
-  getRunBudgetStub,
   isJurisdictionSupported,
 } from "./do-placement"
 
@@ -19,46 +16,6 @@ function createNamespaceHarness() {
 }
 
 describe("durable object placement", () => {
-  it("scopes the entitlement window to the EU jurisdiction with the canonical name", () => {
-    const harness = createNamespaceHarness()
-    const env = {
-      APP_ENV: "preview",
-      entitlementwindow: harness.namespace,
-    } as unknown as Pick<Env, "APP_ENV" | "entitlementwindow">
-
-    getEntitlementWindowStub(env, {
-      customerEntitlementId: "ce_123",
-      customerId: "cus_123",
-      projectId: "proj_123",
-    })
-
-    expect(harness.jurisdiction).toHaveBeenCalledWith("eu")
-    expect(harness.getByName).toHaveBeenCalledWith(
-      "preview:proj_123:cus_123:ce_123",
-      DO_LOCATION_HINT
-    )
-  })
-
-  it("scopes the run budget to the EU jurisdiction with the canonical name", () => {
-    const harness = createNamespaceHarness()
-    const env = {
-      APP_ENV: "preview",
-      runbudget: harness.namespace,
-    } as unknown as Pick<Env, "APP_ENV" | "runbudget">
-
-    getRunBudgetStub(env, {
-      customerId: "cus_123",
-      projectId: "proj_123",
-      runId: "brun_123",
-    })
-
-    expect(harness.jurisdiction).toHaveBeenCalledWith("eu")
-    expect(harness.getByName).toHaveBeenCalledWith(
-      "preview:proj_123:cus_123:brun_123",
-      DO_LOCATION_HINT
-    )
-  })
-
   it.each(["preview", "production"])(
     "places the budget automatically on %s, with the key as the name's tail",
     (appEnv) => {
@@ -80,22 +37,13 @@ describe("durable object placement", () => {
   )
 
   it.each([
-    ["preview", true],
-    ["production", true],
-    ["development", false],
-  ])("applies the jurisdiction on %s", (appEnv, scoped) => {
-    const harness = createNamespaceHarness()
-    const env = {
-      APP_ENV: appEnv,
-      runbudget: harness.namespace,
-    } as unknown as Pick<Env, "APP_ENV" | "runbudget">
-
-    getRunBudgetStub(env, { customerId: "c", projectId: "p", runId: "r" })
-
+    ["preview", "eu"],
+    ["production", "eu"],
+    ["development", undefined],
+  ])("resolves the broadcast jurisdiction on %s", (appEnv, jurisdiction) => {
     // workerd rejects jurisdictions, so local development addresses the
     // unscoped namespace. Everything else must be scoped.
-    expect(harness.jurisdiction).toHaveBeenCalledTimes(scoped ? 1 : 0)
-    expect(harness.getByName).toHaveBeenCalledTimes(1)
+    expect(durableObjectJurisdiction(appEnv)).toBe(jurisdiction)
   })
 
   it("scopes an unrecognised APP_ENV rather than silently skipping it", () => {
@@ -103,21 +51,6 @@ describe("durable object placement", () => {
     expect(isJurisdictionSupported("staging")).toBe(true)
     expect(durableObjectJurisdiction("staging")).toBe(DO_JURISDICTION)
     expect(durableObjectJurisdiction("development")).toBeUndefined()
-  })
-
-  it("never hands out a bare DurableObjectId", () => {
-    // idFromName + get() on different namespaces throws at runtime, not at
-    // compile time. The helpers return a stub so the pair cannot be split.
-    const harness = createNamespaceHarness()
-    const env = {
-      APP_ENV: "preview",
-      runbudget: harness.namespace,
-    } as unknown as Pick<Env, "APP_ENV" | "runbudget">
-
-    getRunBudgetStub(env, { customerId: "c", projectId: "p", runId: "r" })
-
-    expect(harness.namespace).not.toHaveProperty("idFromName.mock")
-    expect(harness.getByName).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -157,7 +90,7 @@ function offenders(pattern: RegExp, options: { includeTests: boolean; allow: str
 describe("durable object placement guards", () => {
   it("addresses durable objects only through do-placement.ts", () => {
     // Catches the whole family, whatever the binding is called at the call
-    // site — including `const ns = env.runbudget; ns.getByName(...)`.
+    // site — including `const ns = env.budget; ns.getByName(...)`.
     // Tests are exempt: they address throwaway object names on purpose, and
     // the next guard still holds them to the scoped namespace.
     const addressing = /\.\s*(getByName|idFromName|newUniqueId)\s*\(/
@@ -165,13 +98,11 @@ describe("durable object placement guards", () => {
   })
 
   it("never reaches through a raw money-state binding", () => {
-    // `env.entitlementwindow.<anything>` — the form that skips the
-    // jurisdiction. Wiring (`entitlementwindow: c.env.entitlementwindow,`) has
-    // no trailing access and stays legal.
-    // `budget` is also an ordinary field name (`decision.budget.runId`), so
-    // that binding is matched only when read off an env.
-    const reachThrough =
-      /\.\s*(entitlementwindow|runbudget)\s*\.\s*\w|\benv\s*\.\s*budget\s*\.\s*\w/
+    // `env.budget.<anything>` skips the canonical name builder. Wiring
+    // (`budget: c.env.budget,`) has no trailing access and stays legal.
+    // `budget` is also an ordinary field name, so the binding is matched only
+    // when read off an env.
+    const reachThrough = /\benv\s*\.\s*budget\s*\.\s*\w/
     expect(offenders(reachThrough, { includeTests: true, allow: [PLACEMENT_MODULE] })).toEqual([])
   })
 

@@ -22,7 +22,8 @@ export const explainCharge = protectedProjectProcedure
       {
         db: opts.ctx.db,
         ledger: opts.ctx.services.ledger,
-        analytics: opts.ctx.analytics,
+        budgetJournal: opts.ctx.services.budgetJournal,
+        rateCards: opts.ctx.services.rateCards,
       },
       {
         projectId: opts.ctx.project.id,
@@ -50,7 +51,6 @@ function explainChargeErrorToTrpcError(error: unknown): TRPCError {
         return new TRPCError({ code: "NOT_FOUND", message: error.message })
       case "BILLING_PERIOD_CONTEXT_MISMATCH":
       case "BILLING_PERIOD_METADATA_MISSING":
-      case "PERIOD_KEY_NOT_DERIVED":
         return new TRPCError({ code: "BAD_REQUEST", message: error.message })
     }
   }

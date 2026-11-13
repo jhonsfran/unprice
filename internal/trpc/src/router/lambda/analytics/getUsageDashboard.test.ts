@@ -50,6 +50,7 @@ function setup() {
   })
   const caller = router.createCaller({
     project: { id: "proj_123" },
+    services: { budgetJournal: {}, customers: {} },
     cache,
     logger: { error: vi.fn() },
   } as unknown as Context)
@@ -64,19 +65,15 @@ function evidence(usage: number): GetUsageDashboardOutput {
       {
         featureSlug: "tokens",
         usage,
-        spending: { amount: "0", currency: "USD", displayAmount: "$0.00" },
+        spending: [{ amount: "0", currency: "USD", displayAmount: "$0.00" }],
       },
     ],
   }
 }
 
 describe("getUsageDashboard cache", () => {
-  it("ignores legacy empty entries and retains the loaded evidence", async () => {
-    const { cache, caller, flush } = setup()
-    await cache.getUsageDashboard.set(
-      "usage-dashboard:proj_123:all:30d:10",
-      emptyUsageDashboardOutput(input.range)
-    )
+  it("loads and caches usage evidence", async () => {
+    const { caller, flush } = setup()
     const result = evidence(7)
     useCases.getUsageDashboard.mockResolvedValue(Ok(result))
 

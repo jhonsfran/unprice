@@ -88,6 +88,46 @@ describe("monetizationConfigSchema", () => {
     expect(() => monetizationConfigSchema.parse(config)).not.toThrow()
   })
 
+  it("preserves groupBy as active pricing configuration", () => {
+    const grouped = structuredClone(config)
+    grouped.plans[0]!.version.features[0]!.meterConfig!.groupBy = ["model"]
+    const parsed = monetizationConfigSchema.parse(grouped)
+    expect(parsed.plans[0]?.version.features[0]?.meterConfig?.groupBy).toEqual(["model"])
+    expect(computeConfigHash(parsed.plans[0]!)).not.toBe(computeConfigHash(config.plans[0]!))
+  })
+
+  it.each(["max", "latest"])("rejects the retired %s meter", (aggregationMethod) => {
+    const rejected = structuredClone(config) as unknown as {
+      plans: { version: { features: { meterConfig: Record<string, unknown> }[] } }[]
+    }
+    rejected.plans[0]!.version.features[0]!.meterConfig.aggregationMethod = aggregationMethod
+    expect(monetizationConfigSchema.safeParse(rejected).success).toBe(false)
+  })
+
+  it.each([
+    ["year", 1],
+    ["month", 2],
+  ])(
+    "requires an explicit supported reset for finite usage billed every %s × %i",
+    (interval, intervalCount) => {
+      const invalid = structuredClone(config)
+      invalid.plans[0]!.version.billingConfig = {
+        name: "long-cycle",
+        interval: interval as "year" | "month",
+        intervalCount,
+      }
+      delete invalid.plans[0]!.version.features[0]!.resetConfig
+      const result = monetizationConfigSchema.safeParse(invalid)
+      expect(
+        result.error?.issues.some(
+          (issue) => issue.path.join(".") === "plans.0.version.features.0.resetConfig"
+        )
+      ).toBe(true)
+      invalid.plans[0]!.version.features[0]!.resetConfig = { interval: "month", intervalCount: 1 }
+      expect(monetizationConfigSchema.safeParse(invalid).success).toBe(true)
+    }
+  )
+
   it("rejects internal identifiers and Dinero snapshots", () => {
     expect(() =>
       monetizationConfigSchema.parse({
@@ -204,21 +244,18 @@ describe("monetizationConfigSchema", () => {
     )
   })
 
-  // filters, groupBy and windowSize are "TODO: implement this later" in shared.ts.
-  it.each(["filters", "groupBy", "windowSize"])(
-    "rejects the unimplemented meter field %s",
-    (field) => {
-      const invalid = structuredClone(config) as unknown as {
-        plans: { version: { features: { meterConfig: Record<string, unknown> }[] } }[]
-      }
-      invalid.plans[0]!.version.features[0]!.meterConfig[field] =
-        field === "groupBy" ? ["a"] : field === "windowSize" ? "HOUR" : { a: "b" }
-
-      expect(() => monetizationConfigSchema.parse(invalid)).toThrow(
-        new RegExp(`Unrecognized key.*${field}`)
-      )
+  // Removed meter knobs must fail at the authoring boundary.
+  it.each(["filters", "windowSize"])("rejects the unimplemented meter field %s", (field) => {
+    const invalid = structuredClone(config) as unknown as {
+      plans: { version: { features: { meterConfig: Record<string, unknown> }[] } }[]
     }
-  )
+    invalid.plans[0]!.version.features[0]!.meterConfig[field] =
+      field === "windowSize" ? "HOUR" : { a: "b" }
+
+    expect(() => monetizationConfigSchema.parse(invalid)).toThrow(
+      new RegExp(`Unrecognized key.*${field}`)
+    )
+  })
 
   // resolveResetConfigForFeature discards it for every non-usage feature, so
   // accepting it would hash a field that changes nothing.
@@ -226,7 +263,6 @@ describe("monetizationConfigSchema", () => {
     const configs: Record<string, unknown> = {
       flat: { price: "1" },
       tier: {
-        tierMode: "volume",
         tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1", flatPrice: "0" }],
       },
       package: { price: "10", units: 5 },
@@ -252,6 +288,31 @@ describe("monetizationConfigSchema", () => {
       0,
       "resetConfig",
     ])
+  })
+
+  it.each([
+    ["package", { price: "10" }, "A package feature needs units: how many units one package holds"],
+    [
+      "usage",
+      { usageMode: "package", price: "10" },
+      "A usage feature in package mode needs units: how many units one package holds",
+    ],
+  ])("rejects a %s feature sold by the package without units", (featureType, config, message) => {
+    const result = monetizationConfigSchema.safeParse(
+      withFirstFeature({
+        featureSlug: "input-tokens",
+        featureType,
+        config,
+        ...(featureType === "usage" && {
+          meterConfig: { eventSlug: "ai_completion", aggregationMethod: "count" },
+        }),
+      })
+    )
+
+    expect(result.success).toBe(false)
+    expect(
+      result.error?.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+    ).toEqual([{ path: "plans.0.version.features.0.config.units", message }])
   })
 
   it("rejects an unknown key inside a price config", () => {
@@ -289,7 +350,7 @@ describe("monetizationConfigSchema", () => {
         config: { usageMode: "unit" },
         meterConfig: countMeter,
       },
-      /price is required/i,
+      /needs a price/i,
     ],
     [
       "tiers with a gap",
@@ -298,7 +359,6 @@ describe("monetizationConfigSchema", () => {
         featureType: "usage",
         config: {
           usageMode: "tier",
-          tierMode: "graduated",
           tiers: [
             { firstUnit: 1, lastUnit: 10, unitPrice: "1", flatPrice: "0" },
             { firstUnit: 20, lastUnit: null, unitPrice: "1", flatPrice: "0" },
@@ -328,6 +388,19 @@ describe("monetizationConfigSchema", () => {
         },
       },
       /tiers.*does not apply to a flat feature/,
+    ],
+    [
+      "tiers that leave the last tier bounded",
+      {
+        featureSlug: "input-tokens",
+        featureType: "usage",
+        config: {
+          usageMode: "tier",
+          tiers: [{ firstUnit: 1, lastUnit: 10, unitPrice: "1", flatPrice: "0" }],
+        },
+        meterConfig: countMeter,
+      },
+      /last tier is unbounded/i,
     ],
   ])("rejects %s", (_label, feature, message) => {
     expect(() => monetizationConfigSchema.parse(withFirstFeature(feature))).toThrow(message)

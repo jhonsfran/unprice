@@ -5,6 +5,7 @@ import {
   type BudgetOutcome,
   UnPriceBudgetError,
 } from "@unprice/services/budgets"
+import type { CardRows } from "@unprice/services/pricing"
 import type { BudgetAddress, BudgetClient, BudgetRequest } from "@unprice/services/use-cases"
 import type { Env } from "~/env"
 import { getBudgetStub } from "../do-placement"
@@ -15,9 +16,10 @@ export class CloudflareBudgetClient implements BudgetClient {
 
   async execute(
     address: BudgetAddress,
-    request: BudgetRequest
+    request: BudgetRequest,
+    cards?: readonly CardRows[]
   ): Promise<Result<BudgetOutcome, UnPriceBudgetError>> {
-    const reply = await getBudgetStub(this.env, address).execute(request)
+    const reply = await getBudgetStub(this.env, address).execute(request, cards)
     return reply.ok ? Ok(reply.outcome) : Err(new UnPriceBudgetError(reply.rejection))
   }
 

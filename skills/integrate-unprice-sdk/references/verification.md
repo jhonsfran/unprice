@@ -46,20 +46,18 @@ For `usage.record`:
 - Test and observe reporting errors without changing the paid-action decision.
 - Confirm event properties match the configured meter inputs.
 
-For budgeted runs:
+For budget holds:
 
-- Test start error and non-running start results.
-- Test accepted and rejected consumption.
-- Test workload exceptions.
-- Assert `runs.end` executes for every started run.
-- Assert rejected consumption and exceptions end with `status: "failed"`.
-- Assert an end error does not hide the original workload error.
+- Test authorize errors and refused holds; no paid work starts after either.
+- Test workload exceptions: a hold whose work produced usage is settled, never released.
+- Assert every allowed hold is settled or released.
+- Assert a settle error does not hide the original workload error.
 - Assert every step has its own stable idempotency key.
 
 For a hard-capped variable-cost provider call:
 
 - Test that an insufficient known-input or output envelope rejects before the provider is called.
-- Test that the provider receives the same output cap used to calculate the run reservation.
+- Test that the provider receives the same output cap used to calculate the hold.
 - Test that one conversation cannot reserve more than its remaining conversation allowance.
 - Test an unexpected rejected settlement as a failure that prevents the next paid call.
 

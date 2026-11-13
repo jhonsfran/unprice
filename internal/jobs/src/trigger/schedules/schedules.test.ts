@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     where: vi.fn(),
   },
   subscriptionFindMany: vi.fn(),
+  phaseFindMany: vi.fn(),
+  periodBatchTrigger: vi.fn(),
 }))
 
 const invoiceRows = [
@@ -77,6 +79,9 @@ vi.mock("../db", () => ({
       subscriptions: {
         findMany: mocks.subscriptionFindMany,
       },
+      subscriptionPhases: {
+        findMany: mocks.phaseFindMany,
+      },
     },
   },
 }))
@@ -93,6 +98,12 @@ vi.mock("../tasks/invoice", () => ({
   },
 }))
 
+vi.mock("../tasks/period", () => ({
+  periodTask: {
+    batchTrigger: mocks.periodBatchTrigger,
+  },
+}))
+
 vi.mock("../tasks/renew", () => ({
   renewTask: {
     batchTrigger: mocks.renewBatchTrigger,
@@ -102,7 +113,12 @@ vi.mock("../tasks/renew", () => ({
 // Loading a schedule pulls in the service graph, which under Turbo contention can outlast one
 // test's timeout. Load them once here, so each test's import is a cache hit.
 beforeAll(async () => {
-  await Promise.all([import("./billing"), import("./invoicing"), import("./renew")])
+  await Promise.all([
+    import("./billing"),
+    import("./invoicing"),
+    import("./periods"),
+    import("./renew"),
+  ])
 }, 120_000)
 
 describe("billingSchedule", () => {
@@ -287,6 +303,104 @@ describe("renewSchedule", () => {
     })
 
     expect(mocks.renewBatchTrigger).not.toHaveBeenCalled()
+    expect(result).toEqual({ subscriptionIds: [] })
+  })
+})
+
+describe("periodsSchedule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.subscriptionFindMany.mockReset()
+    mocks.phaseFindMany.mockReset()
+  })
+
+  it("re-syncs only subscriptions whose phases changed within the last day, besides the due ones", async () => {
+    mocks.subscriptionFindMany.mockResolvedValueOnce([{ id: "sub_1", projectId: "proj_1" }])
+    mocks.phaseFindMany.mockResolvedValueOnce([
+      { subscriptionId: "sub_1", projectId: "proj_1" },
+      { subscriptionId: "sub_2", projectId: "proj_1" },
+      { subscriptionId: "sub_2", projectId: "proj_1" },
+    ])
+    const { periodsSchedule: definition } = await import("./periods")
+    const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
+    const now = Date.parse("2026-07-06T12:00:00.000Z")
+
+    const result = await periodsSchedule.run({ timestamp: new Date(now) })
+
+    const [{ where: phaseWhere }] = mocks.phaseFindMany.mock.calls[0] as [
+      {
+        where: (
+          table: unknown,
+          ops: { gte: (column: unknown, value: number) => unknown }
+        ) => unknown
+      },
+    ]
+    const gte = vi.fn()
+    phaseWhere({ updatedAtM: "updated_at_m" }, { gte })
+    expect(gte).toHaveBeenCalledWith("updated_at_m", now - 24 * 60 * 60 * 1000)
+    // The due selection never reads a subscription's own updatedAtM.
+    const [{ where: dueWhere }] = mocks.subscriptionFindMany.mock.calls[0] as [
+      { where: (table: unknown, ops: Record<string, unknown>) => unknown },
+    ]
+    const ops = {
+      and: vi.fn(),
+      eq: vi.fn(),
+      notInArray: vi.fn(),
+      lte: vi.fn(),
+      gte: vi.fn(),
+      or: vi.fn(),
+    }
+    dueWhere(
+      {
+        active: "active",
+        status: "status",
+        currentCycleEndAt: "current_cycle_end_at_m",
+        updatedAtM: "updated_at_m",
+      },
+      ops
+    )
+    expect(ops.gte).not.toHaveBeenCalled()
+    expect(ops.or).not.toHaveBeenCalled()
+    expect(ops.lte).toHaveBeenCalledWith("current_cycle_end_at_m", now + 3 * 24 * 60 * 60 * 1000)
+    expect(mocks.periodBatchTrigger.mock.calls).toEqual([
+      [
+        [
+          { payload: { subscriptionId: "sub_1", projectId: "proj_1", now } },
+          { payload: { subscriptionId: "sub_2", projectId: "proj_1", now } },
+        ],
+      ],
+    ])
+    expect(result).toEqual({ subscriptionIds: ["sub_1", "sub_2"] })
+  })
+
+  it("triggers at most 500 subscriptions per batch", async () => {
+    const due = Array.from({ length: 1_201 }, (_, i) => ({ id: `sub_${i}`, projectId: "proj_1" }))
+    mocks.subscriptionFindMany.mockResolvedValueOnce(due)
+    mocks.phaseFindMany.mockResolvedValueOnce([])
+    const { periodsSchedule: definition } = await import("./periods")
+    const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
+
+    await periodsSchedule.run({ timestamp: new Date(Date.parse("2026-07-06T12:00:00.000Z")) })
+
+    const sizes = mocks.periodBatchTrigger.mock.calls.map(([items]) => (items as unknown[]).length)
+    expect(sizes).toEqual([500, 500, 201])
+    const last = mocks.periodBatchTrigger.mock.calls[2]?.[0] as Array<{
+      payload: { subscriptionId: string }
+    }>
+    expect(last[200]?.payload.subscriptionId).toBe("sub_1200")
+  })
+
+  it("does nothing when no subscription is due or changed", async () => {
+    mocks.subscriptionFindMany.mockResolvedValueOnce([])
+    mocks.phaseFindMany.mockResolvedValueOnce([])
+    const { periodsSchedule: definition } = await import("./periods")
+    const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
+
+    const result = await periodsSchedule.run({
+      timestamp: new Date(Date.parse("2026-07-06T12:00:00.000Z")),
+    })
+
+    expect(mocks.periodBatchTrigger).not.toHaveBeenCalled()
     expect(result).toEqual({ subscriptionIds: [] })
   })
 })

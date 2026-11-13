@@ -1,4 +1,4 @@
-import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
+import { type BudgetConfigInput, upsertBudgetInternalInputSchema } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
 import { catalogFactsOf, catalogStatusOf } from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
@@ -7,7 +7,7 @@ const t0 = Date.parse("2026-10-14T10:00:00.000Z")
 
 /** The snapshot an upsert of `body` commits on a fresh budget. */
 function upserted(body: BudgetConfigInput) {
-  const { key, unit, config } = upsertBudgetInputSchema.parse({
+  const { key, unit, config } = upsertBudgetInternalInputSchema.parse({
     key: "customer:acme",
     unit: "USD",
     ...body,
@@ -41,6 +41,26 @@ describe("catalogFactsOf", () => {
       ],
       closesAt: null,
     })
+  })
+
+  it("names the feature a quantity limit caps", () => {
+    const budget = upserted({
+      limits: [
+        { amount: "50", window: "month" },
+        { feature: "api_calls", amount: "10000", window: "day" },
+      ],
+    })
+
+    expect(catalogFactsOf(budget).limits).toEqual([
+      { id: "month", window: "month", enforce: "hard", amount: "50" },
+      {
+        id: "api_calls:day",
+        window: "day",
+        enforce: "hard",
+        feature: "api_calls",
+        amount: "10000",
+      },
+    ])
   })
 
   it("is soft when every limit is soft", () => {

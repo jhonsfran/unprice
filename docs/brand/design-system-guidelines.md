@@ -22,12 +22,12 @@ budget, wallet, and invoice details are the product.
    operational data.
 
 3. Make state explicit.
-   Use direct labels such as `processed`, `rejected`, `running`, `budget_exceeded`, `reserved`,
+   Use direct labels such as `processed`, `rejected`, `BUDGET_EXCEEDED`, `reserved`,
    `consumed`, `draft`, `finalized`, and `paid`.
 
 4. Keep developer actions close.
-   API keys, SDK snippets, event slugs, feature slugs, plan version IDs, idempotency keys, replay
-   actions, and error recovery should be easy to find near the state they affect.
+   API keys, SDK snippets, event slugs, feature slugs, plan version IDs, idempotency keys, rejected event
+   payloads, and error recovery should be easy to find near the state they affect.
 
 5. Use visual emphasis only when it changes a decision.
    Color, motion, and hierarchy should explain state or next action, not decorate.
@@ -58,7 +58,7 @@ per-mode values live in `design-tokens.md` ("Elevation & Material Tokens"); the 
 - Use stable dimensions for tables, status chips, counters, toolbars, and icon buttons so loading,
   hover, and dynamic text do not shift layout.
 - Prefer tabbed workflows for customer detail areas: overview, subscriptions, wallet, invoices,
-  runs, events.
+  budgets, events.
 - Use diagrams for complex concepts in docs and onboarding. Product UI should prefer actual state
   over explanatory diagrams.
 
@@ -90,7 +90,7 @@ Every status color needs a text label or icon.
 
 - Use crisp sans-serif text for product UI and docs.
 - **Mono is where the facts live — in both directions.** Monospace for event slugs, feature
-  slugs, IDs, run IDs, plan versions, amounts, timestamps, status codes, ledger facts, API paths,
+  slugs, IDs, budget keys, operation IDs, plan versions, amounts, timestamps, status codes, ledger facts, API paths,
   and code. And the inverse: a fact rendered in sans is a bug, and a full sentence or paragraph
   rendered in mono is a bug (mono states facts; it does not narrate).
 - Marketing display type uses the `text-display-1/2/3` tokens (`design-tokens.md`): bigger means
@@ -112,7 +112,7 @@ Use:
 - Tables for customer, invoice, event, wallet-credit, and run lists.
 - Sheets for explainability, charge details, event details, and drilldowns.
 - Segmented controls or tabs for switching operational views.
-- Icon buttons with tooltips for replay, inspect, copy, refresh, explain, download, and open.
+- Icon buttons with tooltips for inspect, copy, refresh, explain, download, and open.
 - Progress bars only for limits, budgets, wallet runway, or ingestion freshness.
 
 Avoid:
@@ -120,7 +120,7 @@ Avoid:
 - Marketing cards for operational state.
 - Decorative illustrations inside dashboards.
 - Vague labels like "Insights", "Growth", or "Performance" when the state is actually usage,
-  spend, rejections, replay, or invoice evidence.
+  spend, rejections, journal events, or invoice evidence.
 
 ## Product Area Rules
 
@@ -137,23 +137,25 @@ unavoidable and legible.
 
 ### Events And Ingestion
 
-Show processed, rejected, failed, and replayable states. Failed events need a clear recovery action
-and a reason.
+Show processed and rejected journal states. Identify each event by budget key and operation ID.
+Show rejection reasons and stored payloads when present. System failures remain request errors;
+there is no queued replay action.
 
 ### Customers
 
 Treat the customer as the economic actor. Show subscriptions, plan versions, entitlements, wallet
-balances, invoices, and runs as connected state, not separate product silos.
+balances, invoices, and payer budgets as connected state, not separate product silos.
 
 ### Wallet And Credits
 
 Always distinguish purchased, granted, reserved, and consumed balances. Credits should show source,
 expiry, remaining amount, and consumption.
 
-### Budgeted Runs
+### Budget keys
 
-Show budget, consumed, remaining, status, workload type, workload ID, trace ID, and timestamps. Do
-not imply Unprice owns the workload. It only labels and controls spend.
+Show the key, unit, limits, consumed and held amounts, remaining capacity, and close time.
+Applications own workload IDs and execution. Standalone budget keys cap usage; they do not
+reserve customer wallet credits or create invoice usage.
 
 ### Invoices
 
@@ -170,7 +172,7 @@ version, pricing rule, usage quantity, rated facts, ledger captures, and event e
   line ("No events in this window. Health tiles appear once traffic arrives."). Five tiles saying
   "0" five ways is noise, not evidence. Filter facets with nothing to pick and nothing picked
   disappear; keep one anchor group.
-- Empty-state code CTAs are outline buttons, one per state. When an action has sync/async or
+- Empty-state code CTAs are outline buttons, one per state. When an action has record/consume or
   method variants, offer one CTA and let the sheet expose the variants — an implementation fork
   is not the user's first decision.
 

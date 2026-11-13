@@ -155,9 +155,6 @@ function createDeps(
   return {
     deps: {
       db: {} as Database,
-      analytics: {
-        getFeaturesUsagePeriod: vi.fn().mockResolvedValue({ data: [] }),
-      },
       logger: createLogger(),
       services: {
         customers: {

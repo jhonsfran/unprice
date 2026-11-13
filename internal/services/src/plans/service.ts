@@ -1,7 +1,6 @@
-import type { Analytics } from "@unprice/analytics"
-import { type Database, and, desc, eq, getTableColumns, sql } from "@unprice/db"
+import { type Database, and, desc, eq, getTableColumns, ne, sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { nFormatter, newId } from "@unprice/db/utils"
+import { newId } from "@unprice/db/utils"
 import {
   type BillingConfig,
   type BillingInterval,
@@ -14,21 +13,20 @@ import {
   type PlanVersionExtended,
   type PlanVersionFeature,
   type Project,
+  type RateRow,
   type ResetConfig,
   type Subscription,
-  calculateFlatPricePlan,
-  calculateFreeUnits,
-  configFlatSchema,
-  configPackageSchema,
-  configTierSchema,
-  configUsageSchema,
   getAnchor,
   isResetCadenceAtMostBilling,
+  isUsageLimitResetSupported,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
+import type { DbExecutor } from "../deps"
 import type { Metrics } from "../metrics"
+import { describePlanFeatureLine, planVersionPrices, rowsByFeature } from "../pricing"
+import type { RateCardService } from "../rate-cards"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
 
@@ -127,9 +125,9 @@ function featureMetadataWithCadenceFlags({
 export class PlanService {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
+  private readonly rateCards: Pick<RateCardService, "rowsForVersions">
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
 
@@ -157,109 +155,82 @@ export class PlanService {
   constructor({
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
+    rateCards,
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    rateCards: Pick<RateCardService, "rowsForVersions">
   }) {
+    this.rateCards = rateCards
     this.db = db
     this.logger = logger
-    this.analytics = analytics
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
   }
 
+  /**
+   * A published version as the public API shows it. Prices come from the version's rate card in
+   * its currency (ADR-0008 D2): `rows` are that card's rows in effect now.
+   */
   private formatPlanVersion({
     planVersion,
+    rows,
   }: {
     planVersion: PlanVersionExtended & {
       plan: Plan
     }
+    rows: readonly RateRow[]
   }): PlanVersionApi {
-    const planFeatures = planVersion.planFeatures.map((planFeature) => {
-      let displayFeatureText = ""
-
-      const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
-        config: planFeature.config!,
-        featureType: planFeature.featureType,
-      })
-
-      if (freeUnitsErr) {
-        console.error(freeUnitsErr)
-        return {
-          ...planFeature,
-          displayFeatureText: "error calculating free units",
-        }
-      }
-
-      const showUnits =
-        planFeature.featureType === "usage" &&
-        !planFeature.feature.slug.includes(planFeature.unitOfMeasure ?? "units")
-
-      const freeUnitsText =
-        freeUnits === Number.POSITIVE_INFINITY
-          ? planFeature.limit
-            ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
-            : "Unlimited"
-          : freeUnits === 0
-            ? planFeature.limit
-              ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
-              : "Starts at 0"
-            : `${nFormatter(freeUnits)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
-
-      switch (planFeature.featureType) {
-        case "flat": {
-          displayFeatureText = `${planFeature.feature.title}`
-          break
-        }
-
-        case "tier": {
-          displayFeatureText = `${freeUnitsText} ${planFeature.feature.title}`
-          break
-        }
-
-        case "usage": {
-          displayFeatureText = `${freeUnitsText} ${planFeature.feature.title}`
-
-          break
-        }
-
-        case "package": {
-          displayFeatureText = `${freeUnitsText} ${planFeature.feature.title}`
-          break
-        }
-      }
-
-      return {
-        ...planFeature,
-        displayFeatureText,
-      }
-    })
-
-    // calculate flat price
-    // verify if the payment method is required
-    const { err, val: totalPricePlan } = calculateFlatPricePlan({
-      planVersion,
-    })
-
-    if (err) {
-      throw err
-    }
+    const { flatPrice, displayPrices } = planVersionPrices(
+      planVersion.planFeatures,
+      rows,
+      planVersion.currency
+    )
+    const byFeature = rowsByFeature(rows, Date.now())
+    const planFeatures = planVersion.planFeatures.map((planFeature) => ({
+      ...planFeature,
+      displayFeatureText: describePlanFeatureLine(
+        planFeature,
+        byFeature.get(planFeature.feature.slug),
+        planVersion.currency
+      ),
+      displayPrice: displayPrices.get(planFeature.feature.slug) ?? null,
+    }))
 
     return {
       ...planVersion,
-      flatPrice: totalPricePlan.displayAmount,
+      flatPrice,
       planFeatures,
     }
+  }
+
+  /** The rows each version's card prices with now, in the version's own currency. */
+  private async currentRows(
+    versions: readonly Pick<PlanVersion, "id" | "projectId" | "currency">[]
+  ): Promise<Map<string, RateRow[]>> {
+    const [first] = versions
+    if (!first) return new Map()
+    return this.rateCards.rowsForVersions(first.projectId, versions, Date.now())
+  }
+
+  public async getPlanVersionWithPrices(
+    input: Parameters<PlanService["getPlanVersionByIdDetailed"]>[0]
+  ) {
+    const found = await this.getPlanVersionByIdDetailed(input)
+    if (found.err) return Err(found.err)
+    if (!found.val) return Ok(null)
+    const rows = await this.currentRows([found.val])
+    return Ok(
+      this.formatPlanVersion({ planVersion: found.val, rows: rows.get(found.val.id) ?? [] })
+    )
   }
 
   private async getPlanVersionData({
@@ -306,9 +277,10 @@ export class PlanService {
       return null
     }
 
-    // format plan
+    const rows = await this.currentRows([planVersionData])
     return this.formatPlanVersion({
       planVersion: planVersionData,
+      rows: rows.get(planVersionData.id) ?? [],
     })
   }
 
@@ -384,10 +356,11 @@ export class PlanService {
       ? planVersionsData.filter((version) => version.plan.enterprisePlan)
       : planVersionsData
 
-    // format every plan
+    const rows = await this.currentRows(filtered)
     const result = filtered.map((version) => {
       return this.formatPlanVersion({
         planVersion: version,
+        rows: rows.get(version.id) ?? [],
       })
     })
 
@@ -1123,24 +1096,27 @@ export class PlanService {
     return Ok((val as PlanVersion | null) ?? null)
   }
 
-  public async getPlanVersionByIdDetailed({
-    planVersionId,
-    projectId,
-  }: {
-    planVersionId: string
-    projectId: string
-  }): Promise<
+  public async getPlanVersionByIdDetailed(
+    {
+      planVersionId,
+      projectId,
+    }: {
+      planVersionId: string
+      projectId: string
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | (PlanVersion & {
           plan: Plan
-          planFeatures: Array<unknown>
+          planFeatures: Array<PlanVersionFeature & { feature: Feature }>
         })
       | null,
       FetchError
     >
   > {
     const { val, err } = await wrapResult(
-      this.db.query.versions.findFirst({
+      executor.query.versions.findFirst({
         with: {
           plan: true,
           planFeatures: {
@@ -1171,7 +1147,14 @@ export class PlanService {
       return Err(err)
     }
 
-    return Ok((val as (PlanVersion & { plan: Plan; planFeatures: Array<unknown> }) | null) ?? null)
+    return Ok(
+      (val as
+        | (PlanVersion & {
+            plan: Plan
+            planFeatures: Array<PlanVersionFeature & { feature: Feature }>
+          })
+        | null) ?? null
+    )
   }
 
   public async getPlanVersionByIdForDuplication({
@@ -1439,167 +1422,19 @@ export class PlanService {
 
     const { val, err } = await wrapResult(
       this.db.transaction(async (tx) => {
-        const shouldUpdateFeatureCurrency = currency && currency !== planVersionData.currency
         const shouldUpdateFeatureCadence =
           billingConfig !== undefined &&
           !billingConfigsMatch(planVersionData.billingConfig, billingConfig)
 
-        const features =
-          shouldUpdateFeatureCurrency || shouldUpdateFeatureCadence
-            ? await tx.query.planVersionFeatures.findMany({
-                where: (feature, { and, eq }) =>
-                  and(
-                    eq(feature.planVersionId, planVersionData.id),
-                    eq(feature.projectId, projectId)
-                  ),
-              })
-            : []
-
-        if (shouldUpdateFeatureCurrency) {
-          await Promise.all(
-            features.map(async (feature) => {
-              switch (feature.featureType) {
-                case "flat": {
-                  const config = configFlatSchema.parse(feature.config)
-                  return tx
-                    .update(schema.planVersionFeatures)
-                    .set({
-                      config: {
-                        ...config,
-                        price: {
-                          ...config.price,
-                          dinero: {
-                            ...config.price.dinero,
-                            currency: {
-                              ...config.price.dinero.currency,
-                              code: currency,
-                            },
-                          },
-                        },
-                      },
-                    })
-                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                }
-                case "tier": {
-                  const config = configTierSchema.parse(feature.config)
-                  return tx
-                    .update(schema.planVersionFeatures)
-                    .set({
-                      config: {
-                        ...config,
-                        tiers: config.tiers.map((tier) => ({
-                          ...tier,
-                          unitPrice: {
-                            ...tier.unitPrice,
-                            dinero: {
-                              ...tier.unitPrice.dinero,
-                              currency: {
-                                ...tier.unitPrice.dinero.currency,
-                                code: currency,
-                              },
-                            },
-                          },
-                          flatPrice: {
-                            ...tier.flatPrice,
-                            dinero: {
-                              ...tier.flatPrice.dinero,
-                              currency: {
-                                ...tier.flatPrice.dinero.currency,
-                                code: currency,
-                              },
-                            },
-                          },
-                        })),
-                      },
-                    })
-                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                }
-                case "usage": {
-                  const config = configUsageSchema.parse(feature.config)
-                  if (config.tiers && config.tiers.length > 0) {
-                    return tx
-                      .update(schema.planVersionFeatures)
-                      .set({
-                        config: {
-                          ...config,
-                          tiers: config.tiers.map((tier) => ({
-                            ...tier,
-                            unitPrice: {
-                              ...tier.unitPrice,
-                              dinero: {
-                                ...tier.unitPrice.dinero,
-                                currency: {
-                                  ...tier.unitPrice.dinero.currency,
-                                  code: currency,
-                                },
-                              },
-                            },
-                            flatPrice: {
-                              ...tier.flatPrice,
-                              dinero: {
-                                ...tier.flatPrice.dinero,
-                                currency: {
-                                  ...tier.flatPrice.dinero.currency,
-                                  code: currency,
-                                },
-                              },
-                            },
-                          })),
-                        },
-                      })
-                      .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                  }
-
-                  if (config.price) {
-                    return tx
-                      .update(schema.planVersionFeatures)
-                      .set({
-                        config: {
-                          ...config,
-                          price: {
-                            ...config.price,
-                            dinero: {
-                              ...config.price.dinero,
-                              currency: {
-                                ...config.price.dinero.currency,
-                                code: currency,
-                              },
-                            },
-                          },
-                        },
-                      })
-                      .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                  }
-
-                  return undefined
-                }
-                case "package": {
-                  const config = configPackageSchema.parse(feature.config)
-                  return tx
-                    .update(schema.planVersionFeatures)
-                    .set({
-                      config: {
-                        ...config,
-                        price: {
-                          ...config.price,
-                          dinero: {
-                            ...config.price.dinero,
-                            currency: {
-                              ...config.price.dinero.currency,
-                              code: currency,
-                            },
-                          },
-                        },
-                      },
-                    })
-                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                }
-                default:
-                  return undefined
-              }
+        const features = shouldUpdateFeatureCadence
+          ? await tx.query.planVersionFeatures.findMany({
+              where: (feature, { and, eq }) =>
+                and(
+                  eq(feature.planVersionId, planVersionData.id),
+                  eq(feature.projectId, projectId)
+                ),
             })
-          )
-        }
+          : []
 
         if (shouldUpdateFeatureCadence && billingConfig) {
           await Promise.all(
@@ -1667,6 +1502,20 @@ export class PlanService {
                 )
             })
           )
+        }
+
+        // A version prices with its card in its own currency (ADR-0008 D2). A new currency drops
+        // the cards of every other one, so publishing asks for a card in the new currency.
+        if (currency !== undefined && currency !== planVersionData.currency) {
+          await tx
+            .delete(schema.planVersionRateCards)
+            .where(
+              and(
+                eq(schema.planVersionRateCards.projectId, projectId),
+                eq(schema.planVersionRateCards.planVersionId, planVersionData.id),
+                ne(schema.planVersionRateCards.currency, currency)
+              )
+            )
         }
 
         return tx
@@ -1899,13 +1748,16 @@ export class PlanService {
     })
   }
 
-  public async getPlanVersionFeatureByIdDetailed({
-    id,
-    projectId,
-  }: {
-    id: string
-    projectId: string
-  }): Promise<
+  public async getPlanVersionFeatureByIdDetailed(
+    {
+      id,
+      projectId,
+    }: {
+      id: string
+      projectId: string
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | (PlanVersionFeature & {
           planVersion: PlanVersion
@@ -1916,7 +1768,7 @@ export class PlanService {
     >
   > {
     const { val, err } = await wrapResult(
-      this.db.query.planVersionFeatures.findFirst({
+      executor.query.planVersionFeatures.findFirst({
         with: {
           planVersion: true,
           feature: true,
@@ -2035,6 +1887,7 @@ export class PlanService {
     unitOfMeasure,
     meterConfig,
     hasMeterConfigOverride,
+    included,
   }: {
     projectId: string
     featureId: string
@@ -2051,6 +1904,8 @@ export class PlanService {
     unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
     meterConfig?: PlanVersionFeature["meterConfig"]
     hasMeterConfigOverride: boolean
+    /** Units included per statement period (ADR-0008 D5); only a usage feature keeps them. */
+    included?: PlanVersionFeature["included"]
   }): Promise<
     Result<
       | {
@@ -2131,8 +1986,11 @@ export class PlanService {
 
     if (
       featureType === "usage" &&
-      resetConfigCreate &&
-      !isResetCadenceAtMostBilling(resetConfigCreate, billingConfigCreate)
+      ((resetConfigCreate &&
+        !isResetCadenceAtMostBilling(resetConfigCreate, billingConfigCreate)) ||
+        (typeof limit === "number" &&
+          limit > 0 &&
+          !isUsageLimitResetSupported(billingConfigCreate, resetConfigCreate)))
     ) {
       return Ok({
         state: "invalid_reset_config",
@@ -2169,6 +2027,7 @@ export class PlanService {
             resetConfig: resetConfigCreate,
             type: type ?? "feature",
             meterConfig: meterConfigSnapshot,
+            included: featureType === "usage" ? (included ?? null) : null,
           })
           .returning()
           .then((rows) => rows[0] ?? null)
@@ -2224,41 +2083,47 @@ export class PlanService {
     })
   }
 
-  public async updatePlanVersionFeatureRecord({
-    projectId,
-    id,
-    planVersionId,
-    featureId,
-    featureType,
-    config,
-    metadata,
-    order,
-    defaultQuantity,
-    limit,
-    billingConfig,
-    resetConfig,
-    type,
-    unitOfMeasure,
-    meterConfig,
-    hasMeterConfigOverride,
-  }: {
-    projectId: string
-    id: string
-    planVersionId: string
-    featureId?: PlanVersionFeature["featureId"]
-    featureType?: PlanVersionFeature["featureType"]
-    config?: PlanVersionFeature["config"]
-    metadata?: PlanVersionFeature["metadata"]
-    order?: PlanVersionFeature["order"]
-    defaultQuantity?: PlanVersionFeature["defaultQuantity"]
-    limit?: PlanVersionFeature["limit"]
-    billingConfig?: PlanVersionFeature["billingConfig"]
-    resetConfig?: PlanVersionFeature["resetConfig"]
-    type?: PlanVersionFeature["type"]
-    unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
-    meterConfig?: PlanVersionFeature["meterConfig"]
-    hasMeterConfigOverride: boolean
-  }): Promise<
+  public async updatePlanVersionFeatureRecord(
+    {
+      projectId,
+      id,
+      planVersionId,
+      featureId,
+      featureType,
+      config,
+      metadata,
+      order,
+      defaultQuantity,
+      limit,
+      billingConfig,
+      resetConfig,
+      type,
+      unitOfMeasure,
+      meterConfig,
+      hasMeterConfigOverride,
+      included,
+    }: {
+      projectId: string
+      id: string
+      planVersionId: string
+      featureId?: PlanVersionFeature["featureId"]
+      featureType?: PlanVersionFeature["featureType"]
+      config?: PlanVersionFeature["config"]
+      metadata?: PlanVersionFeature["metadata"]
+      order?: PlanVersionFeature["order"]
+      defaultQuantity?: PlanVersionFeature["defaultQuantity"]
+      limit?: PlanVersionFeature["limit"]
+      billingConfig?: PlanVersionFeature["billingConfig"]
+      resetConfig?: PlanVersionFeature["resetConfig"]
+      type?: PlanVersionFeature["type"]
+      unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
+      meterConfig?: PlanVersionFeature["meterConfig"]
+      hasMeterConfigOverride: boolean
+      /** Units included per statement period (ADR-0008 D5); undefined keeps the stored value. */
+      included?: PlanVersionFeature["included"]
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | {
           state:
@@ -2278,7 +2143,7 @@ export class PlanService {
       FetchError
     >
   > {
-    const existingPlanVersionFeature = await this.db.query.planVersionFeatures.findFirst({
+    const existingPlanVersionFeature = await executor.query.planVersionFeatures.findFirst({
       with: {
         feature: true,
       },
@@ -2292,7 +2157,7 @@ export class PlanService {
       })
     }
 
-    const planVersionData = await this.db.query.versions.findFirst({
+    const planVersionData = await executor.query.versions.findFirst({
       where: (version, { and, eq }) =>
         and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
     })
@@ -2361,8 +2226,10 @@ export class PlanService {
 
     if (
       featureTypeUpdate === "usage" &&
-      resetConfigUpdate &&
-      !isResetCadenceAtMostBilling(resetConfigUpdate, billingConfigUpdate)
+      ((resetConfigUpdate &&
+        !isResetCadenceAtMostBilling(resetConfigUpdate, billingConfigUpdate)) ||
+        (((limit === undefined ? existingPlanVersionFeature.limit : limit) ?? 0) > 0 &&
+          !isUsageLimitResetSupported(billingConfigUpdate, resetConfigUpdate)))
     ) {
       return Ok({
         state: "invalid_reset_config",
@@ -2380,7 +2247,7 @@ export class PlanService {
     }
 
     const { val, err } = await wrapResult(
-      this.db.transaction(async (tx) => {
+      executor.transaction(async (tx) => {
         const planVersionFeatureUpdated = await tx
           .update(schema.planVersionFeatures)
           .set({
@@ -2402,6 +2269,10 @@ export class PlanService {
               billingConfig: billingConfigUpdate,
             }),
             ...(featureTypeUpdate === "usage" && { resetConfig: resetConfigUpdate }),
+            // Only a usage feature keeps an allowance.
+            ...(featureTypeUpdate !== "usage"
+              ? { included: null }
+              : included !== undefined && { included }),
             ...(type && { type }),
             updatedAtM: Date.now(),
           })
@@ -2465,13 +2336,16 @@ export class PlanService {
     })
   }
 
-  public async removePlanVersionFeatureRecord({
-    projectId,
-    id,
-  }: {
-    projectId: string
-    id: string
-  }): Promise<
+  public async removePlanVersionFeatureRecord(
+    {
+      projectId,
+      id,
+    }: {
+      projectId: string
+      id: string
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | { state: "not_found" | "published_conflict" }
       | {
@@ -2481,7 +2355,7 @@ export class PlanService {
       FetchError
     >
   > {
-    const planVersionFeatureData = await this.db.query.planVersionFeatures.findFirst({
+    const planVersionFeatureData = await executor.query.planVersionFeatures.findFirst({
       with: {
         planVersion: true,
       },
@@ -2502,7 +2376,7 @@ export class PlanService {
     }
 
     const { val, err } = await wrapResult(
-      this.db
+      executor
         .delete(schema.planVersionFeatures)
         .where(
           and(

@@ -1,27 +1,17 @@
-import type {
-  FeatureUsagePeriodRow,
-  FeatureUsageTimeseriesRow,
-  TopConsumerRow,
-} from "@unprice/analytics"
-import type { Database } from "@unprice/db"
-import { FetchError } from "@unprice/error"
+import { FetchError, Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
+import { journalAnalytics } from "../../analytics/journal.fixture"
 import {
-  type GetUsageDashboardDeps,
   type GetUsageDashboardInput,
   getUsageDashboard,
   hasUsageDashboardEvidence,
 } from "./get-usage-dashboard"
 
-const firstHour = Date.parse("2026-06-13T07:00:00.000Z")
-const secondHour = Date.parse("2026-06-13T08:00:00.000Z")
-const thirdHour = Date.parse("2026-06-13T09:00:00.000Z")
 const now = Date.parse("2026-06-13T09:30:00.000Z")
 const last24hQueryStart = Date.parse("2026-06-12T09:00:00.000Z")
-const last30dQueryStart = Date.parse("2026-05-14T00:00:00.000Z")
 
 describe("getUsageDashboard", () => {
-  it("distinguishes provisional empty results from analytics evidence", () => {
+  it("distinguishes provisional empty results from usage evidence", () => {
     expect(
       hasUsageDashboardEvidence({
         summary: { featureCount: 0, totalLatestUsage: 0, spending: [] },
@@ -31,244 +21,241 @@ describe("getUsageDashboard", () => {
         freshness: { generatedAt: now, dataFrom: last24hQueryStart, dataTo: now },
       })
     ).toBe(false)
-
-    expect(
-      hasUsageDashboardEvidence({
-        summary: { featureCount: 1, totalLatestUsage: 0, spending: [] },
-        features: [
-          {
-            featureSlug: "tokens",
-            usage: 0,
-            spending: { amount: "0", currency: "USD", displayAmount: "$0.00" },
-          },
-        ],
-        timeseries: [],
-        topConsumers: [],
-        freshness: { generatedAt: now, dataFrom: last24hQueryStart, dataTo: now },
-      })
-    ).toBe(true)
   })
 
-  it("derives summary rows from period totals and chart rows from time buckets", async () => {
-    const { deps, analytics } = makeDeps({
-      now: () => now,
-      timeseriesRows: [
-        timeseriesRow({
-          date: firstHour,
-          feature_slug: "events",
-          usage: 4,
-          amount_after: 0,
-          currency: "USD",
-        }),
-        timeseriesRow({
-          date: firstHour,
-          feature_slug: "customers",
-          usage: 3,
-          amount_after: 100_000_000,
-          currency: "USD",
-        }),
-        timeseriesRow({
-          date: secondHour,
-          feature_slug: "events",
-          usage: 9,
-          amount_after: 0,
-          currency: "USD",
-        }),
-        timeseriesRow({
-          date: thirdHour,
-          feature_slug: "pages",
-          usage: 2,
-          amount_after: 0,
-          currency: "USD",
-        }),
-      ],
-      periodRows: [
-        periodRow({
-          feature_slug: "events",
-          usage: 13,
-          amount_after: 0,
-          currency: "USD",
-        }),
-        periodRow({
-          feature_slug: "customers",
-          usage: 3,
-          amount_after: 100_000_000,
-          currency: "USD",
-        }),
-        periodRow({
-          feature_slug: "pages",
-          usage: 2,
-          amount_after: 0,
-          currency: "USD",
-        }),
-      ],
-    })
-
-    const result = await getUsageDashboard(deps, baseInput({ customerId: "cus_1" }))
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.summary).toEqual({
-      featureCount: 3,
-      totalLatestUsage: 18,
-      spending: [
-        {
-          currency: "USD",
-          amount: "1",
-          displayAmount: "$1.00",
-        },
-      ],
-    })
-    expect(result.val?.features.map((feature) => [feature.featureSlug, feature.usage])).toEqual([
-      ["events", 13],
-      ["customers", 3],
-      ["pages", 2],
-    ])
-    expect(result.val?.timeseries.map((row) => [row.date, row.featureSlug, row.usage])).toEqual([
-      [firstHour, "customers", 3],
-      [firstHour, "events", 4],
-      [firstHour, "pages", 0],
-      [secondHour, "customers", 3],
-      [secondHour, "events", 9],
-      [secondHour, "pages", 0],
-      [thirdHour, "customers", 3],
-      [thirdHour, "events", 9],
-      [thirdHour, "pages", 2],
-    ])
-    expect(analytics.getFeaturesUsageTimeseries).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      start: last24hQueryStart,
-      end: now,
-    })
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      start: last24hQueryStart,
-      end: now,
-    })
-    expect(analytics.getTopConsumers).not.toHaveBeenCalled()
-  })
-
-  it("aligns rolling dashboard windows to Tinybird rollup buckets", async () => {
-    const { deps, analytics } = makeDeps({
-      now: () => now,
-      timeseriesRows: [timeseriesRow({})],
-      periodRows: [periodRow({})],
-    })
-
-    const result = await getUsageDashboard(deps, baseInput({ range: "30d" }))
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.freshness).toEqual({
-      generatedAt: now,
-      dataFrom: last30dQueryStart,
-      dataTo: now,
-    })
-    expect(analytics.getFeaturesUsageTimeseries).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      start: last30dQueryStart,
-      end: now,
-    })
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      start: last30dQueryStart,
-      end: now,
-    })
-  })
-
-  it("loads top consumers only for the project dashboard", async () => {
-    const { deps, analytics } = makeDeps({
-      now: () => now,
-      timeseriesRows: [
-        timeseriesRow({
-          date: firstHour,
-          feature_slug: "events",
-          usage: 4,
-          amount_after: 0,
-          currency: "USD",
-        }),
-      ],
-      periodRows: [
-        periodRow({
-          feature_slug: "events",
-          usage: 4,
-          amount_after: 0,
-          currency: "USD",
-        }),
-      ],
-      topConsumerRows: [
-        {
-          customer_id: "cus_1",
-          total_usage: 7,
-          total_amount_after: 250_000_000,
-          currency: "USD",
-        },
-      ],
-      customerRows: [{ id: "cus_1", email: "one@example.com", name: "One" }],
-    })
-
-    const result = await getUsageDashboard(deps, baseInput({ customerId: undefined }))
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.topConsumers).toEqual([
+  it("folds journal rows into feature totals, per-bucket series, and a summary", async () => {
+    const { budgetJournal, queries } = journalAnalytics(() => [
       {
-        customerId: "cus_1",
-        email: "one@example.com",
-        name: "One",
-        totalUsage: 7,
-        displaySpending: "$2.50",
+        bucket: "2026-06-13T07:00:00Z",
+        feature_slug: "tokens",
+        unit: "money:EUR",
+        events: "3",
+        quantity: "1500.00000000",
+        amount: "0.75000000",
+      },
+      {
+        bucket: "2026-06-13T07:00:00Z",
+        feature_slug: "calls",
+        unit: "money:EUR",
+        events: 2,
+        quantity: "2.00000000",
+        amount: "-0.10000000",
+      },
+      {
+        bucket: "2026-06-13T09:00:00Z",
+        feature_slug: "tokens",
+        unit: "money:EUR",
+        events: 1,
+        quantity: "500.00000000",
+        amount: "0.25000000",
       },
     ])
-    expect(analytics.getTopConsumers).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      start: last24hQueryStart,
-      end: now,
-      limit: 10,
+
+    const result = await getUsageDashboard(
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
+      input({ customerId: "cus_1" })
+    )
+
+    expect(queries).toHaveLength(1)
+    expect(queries[0]).toContain("budget_key = 'unprice:customer:cus_1'")
+    expect(queries[0]).toContain("date_trunc('hour', timestamp)")
+    expect(queries[0]).toContain("timestamp >= '2026-06-12T09:00:00.000Z'")
+    expect(result.val?.features).toEqual([
+      {
+        featureSlug: "tokens",
+        usage: 2000,
+        spending: [{ amount: "1", currency: "EUR", displayAmount: expect.any(String) }],
+      },
+      {
+        featureSlug: "calls",
+        usage: 2,
+        spending: [{ amount: "-0.1", currency: "EUR", displayAmount: expect.any(String) }],
+      },
+    ])
+    expect(
+      result.val?.timeseries.map(({ date, featureSlug, usage }) => [date, featureSlug, usage])
+    ).toEqual([
+      [Date.parse("2026-06-13T07:00:00Z"), "calls", 2],
+      [Date.parse("2026-06-13T07:00:00Z"), "tokens", 1500],
+      [Date.parse("2026-06-13T09:00:00Z"), "calls", 0],
+      [Date.parse("2026-06-13T09:00:00Z"), "tokens", 500],
+    ])
+    expect(result.val?.summary).toMatchObject({
+      featureCount: 2,
+      totalLatestUsage: 2002,
+      spending: [{ amount: "0.9", currency: "EUR" }],
     })
+    expect(result.val?.topConsumers).toEqual([])
+    expect(result.val?.freshness).toEqual({
+      generatedAt: now,
+      dataFrom: last24hQueryStart,
+      dataTo: now,
+    })
+    expect(result.val?.warnings).toBeUndefined()
   })
 
-  it("returns fetch errors when the usage time series query fails", async () => {
-    const { deps } = makeDeps({
-      timeseriesError: new Error("tinybird unavailable"),
-      periodRows: [periodRow({})],
-    })
-
-    const result = await getUsageDashboard(deps, baseInput({ customerId: "cus_1" }))
-
-    expect(result.val).toBeUndefined()
-    expect(result.err).toBeInstanceOf(FetchError)
-    expect(result.err?.message).toBe("tinybird unavailable")
+  it("warns when events fed more features than the query reads", async () => {
+    const { budgetJournal } = journalAnalytics(() => [
+      {
+        bucket: "2026-06-13T07:00:00Z",
+        feature_slug: null,
+        unit: "money:USD",
+        events: 4,
+        quantity: null,
+        amount: null,
+      },
+    ])
+    const result = await getUsageDashboard(
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
+      input({ customerId: "cus_1" })
+    )
+    expect(result.val?.features).toEqual([])
+    expect(result.val?.warnings).toEqual([
+      "4 events fed more than 8 features; their other features are not shown.",
+    ])
   })
 
-  it("returns fetch errors when the usage period query fails", async () => {
-    const { deps } = makeDeps({
-      timeseriesRows: [timeseriesRow({})],
-      periodError: new Error("tinybird period unavailable"),
+  it("keeps currencies separate for one feature in summaries and time buckets", async () => {
+    const { budgetJournal } = journalAnalytics(() => [
+      {
+        bucket: "2026-06-13T07:00:00Z",
+        feature_slug: "tokens",
+        unit: "money:EUR",
+        events: 1,
+        quantity: "10",
+        amount: "1",
+      },
+      {
+        bucket: "2026-06-13T07:00:00Z",
+        feature_slug: "tokens",
+        unit: "money:USD",
+        events: 1,
+        quantity: "20",
+        amount: "2",
+      },
+      {
+        bucket: "2026-06-13T09:00:00Z",
+        feature_slug: "tokens",
+        unit: "money:EUR",
+        events: 1,
+        quantity: "30",
+        amount: "3",
+      },
+    ])
+    const result = await getUsageDashboard(
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
+      input()
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.features).toMatchObject([
+      {
+        featureSlug: "tokens",
+        usage: 60,
+        spending: [
+          { amount: "4", currency: "EUR" },
+          { amount: "2", currency: "USD" },
+        ],
+      },
+    ])
+    expect(result.val?.summary).toMatchObject({
+      featureCount: 1,
+      totalLatestUsage: 60,
+      spending: [
+        { amount: "4", currency: "EUR" },
+        { amount: "2", currency: "USD" },
+      ],
     })
-
-    const result = await getUsageDashboard(deps, baseInput({ customerId: "cus_1" }))
-
-    expect(result.val).toBeUndefined()
-    expect(result.err).toBeInstanceOf(FetchError)
-    expect(result.err?.message).toBe("tinybird period unavailable")
+    expect(result.val?.timeseries).toMatchObject([
+      {
+        usage: 30,
+        spending: [
+          { amount: "1", currency: "EUR" },
+          { amount: "2", currency: "USD" },
+        ],
+      },
+      { usage: 30, spending: [{ amount: "3", currency: "EUR" }] },
+    ])
   })
 
-  it("returns fetch error when the top-consumers query fails", async () => {
-    const { deps } = makeDeps({
-      timeseriesRows: [timeseriesRow({})],
-      periodRows: [periodRow({})],
-      topConsumersError: new Error("tinybird consumers unavailable"),
-    })
-    const result = await getUsageDashboard(deps, baseInput({ customerId: undefined }))
-    expect(result.val).toBeUndefined()
+  it("keeps every currency when a top consumer used different payer units", async () => {
+    const { budgetJournal } = journalAnalytics((sql) =>
+      sql.includes("amount_total")
+        ? [
+            { budget_key: "unprice:customer:cus_1", unit: "money:USD", events: 5, amount: "7" },
+            { budget_key: "unprice:customer:cus_1", unit: "money:EUR", events: 2, amount: "3" },
+          ]
+        : []
+    )
+    const result = await getUsageDashboard(
+      {
+        budgetJournal,
+        customers: fakeCustomers([{ id: "cus_1", email: "a@example.com", name: "A" }]),
+        now: () => now,
+      },
+      input({ customerId: undefined })
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.topConsumers).toHaveLength(1)
+    expect(result.val?.topConsumers[0]).toMatchObject({ customerId: "cus_1", totalUsage: 7 })
+    expect(result.val?.topConsumers[0]?.displaySpending).toBe("3,00\u00a0€ + $7.00")
+  })
+
+  it("ranks the project's top payers and resolves them to customers", async () => {
+    const { budgetJournal, queries } = journalAnalytics((sql) =>
+      sql.includes("amount_total")
+        ? [
+            {
+              budget_key: "unprice:customer:cus_2",
+              unit: "money:USD",
+              events: "7",
+              amount: "12.50000000",
+            },
+            {
+              budget_key: "unprice:customer:cus_gone",
+              unit: "money:USD",
+              events: "1",
+              amount: "1.00000000",
+            },
+          ]
+        : []
+    )
+    const result = await getUsageDashboard(
+      {
+        budgetJournal,
+        customers: fakeCustomers([{ id: "cus_2", email: "b@example.com", name: "B" }]),
+        now: () => now,
+      },
+      input({ customerId: undefined, range: "30d" })
+    )
+
+    expect(queries[0]).toContain("starts_with(budget_key, 'unprice:customer:')")
+    expect(queries[0]).toContain("date_trunc('day', timestamp)")
+    expect(queries[1]).toContain("LIMIT 10")
+    expect(result.val?.topConsumers).toEqual([
+      {
+        customerId: "cus_2",
+        email: "b@example.com",
+        name: "B",
+        totalUsage: 7,
+        displaySpending: expect.stringContaining("12.50"),
+      },
+    ])
+  })
+
+  it("returns the journal's failure", async () => {
+    const { budgetJournal } = journalAnalytics(() => new Error("basin down"))
+    const result = await getUsageDashboard(
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
+      input({ customerId: "cus_1" })
+    )
     expect(result.err).toBeInstanceOf(FetchError)
-    expect(result.err?.message).toBe("tinybird consumers unavailable")
+    expect(result.err?.message).toContain("basin down")
   })
 })
 
-function baseInput(overrides: Partial<GetUsageDashboardInput> = {}): GetUsageDashboardInput {
+function input(overrides: Partial<GetUsageDashboardInput> = {}): GetUsageDashboardInput {
   return {
     projectId: "proj_1",
     customerId: "cus_1",
@@ -278,86 +265,6 @@ function baseInput(overrides: Partial<GetUsageDashboardInput> = {}): GetUsageDas
   }
 }
 
-function periodRow(overrides: Partial<FeatureUsagePeriodRow>): FeatureUsagePeriodRow {
-  return {
-    project_id: "proj_1",
-    customer_id: "cus_1",
-    customer_entitlement_id: "ce_1",
-    feature_slug: "events",
-    usage: 1,
-    amount_after: 0,
-    currency: "USD",
-    ...overrides,
-  }
-}
-
-function timeseriesRow(overrides: Partial<FeatureUsageTimeseriesRow>): FeatureUsageTimeseriesRow {
-  return {
-    date: firstHour,
-    feature_slug: "events",
-    usage: 1,
-    amount_after: 0,
-    currency: "USD",
-    ...overrides,
-  }
-}
-
-function makeDeps({
-  timeseriesRows = [],
-  periodRows = [],
-  topConsumerRows = [],
-  customerRows = [],
-  timeseriesError,
-  periodError,
-  topConsumersError,
-  now: nowFn = () => now,
-}: {
-  timeseriesRows?: FeatureUsageTimeseriesRow[]
-  periodRows?: FeatureUsagePeriodRow[]
-  topConsumerRows?: TopConsumerRow[]
-  customerRows?: Array<{ id: string; email: string; name: string }>
-  timeseriesError?: Error
-  periodError?: Error
-  topConsumersError?: Error
-  now?: () => number
-} = {}) {
-  const analytics = {
-    getFeaturesUsageTimeseries: vi.fn(async () => {
-      if (timeseriesError) {
-        throw timeseriesError
-      }
-
-      return { data: timeseriesRows }
-    }),
-    getFeaturesUsagePeriod: vi.fn(async () => {
-      if (periodError) {
-        throw periodError
-      }
-
-      return { data: periodRows }
-    }),
-    getTopConsumers: vi.fn(async () => {
-      if (topConsumersError) {
-        throw topConsumersError
-      }
-
-      return { data: topConsumerRows }
-    }),
-  }
-
-  const db = {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(async () => customerRows),
-      })),
-    })),
-  } as unknown as Database
-
-  const deps: GetUsageDashboardDeps = {
-    analytics,
-    db,
-    now: nowFn,
-  }
-
-  return { deps, analytics, db }
+function fakeCustomers(customerRows: Array<{ id: string; email: string; name: string }> = []) {
+  return { findManyByIds: vi.fn(async () => Ok(customerRows)) }
 }

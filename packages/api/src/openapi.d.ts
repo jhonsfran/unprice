@@ -24,106 +24,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/runs/start": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * start a budgeted run
-     * @description Start a new budgeted run with a budget reservation against a customer. The currency is inherited from the customer's active subscription plan. budgetAmountMinor is in currency minor units, usually cents (e.g. 5000 = $50.00 USD). The reservation expires after one hour by default. expiresAt can override it up to 24 hours after start.
-     */
-    post: operations["runs.start"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/runs/consume/{runId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * apply sync metered event to a run
-     * @description Apply a synchronous metered event to a running budget run
-     */
-    post: operations["runs.consume"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/runs/settle/{runId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * settle incurred usage against a run
-     * @description Record already-incurred usage without feature-limit enforcement and reconcile its cost against the run budget. The run remains open until runs.end.
-     */
-    post: operations["runs.settle"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/runs/end/{runId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * end a budgeted run
-     * @description End a running budget run and release unused reservation
-     */
-    post: operations["runs.end"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/runs/get/{runId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * get a budgeted run
-     * @description Get the current status and budget of a run
-     */
-    get: operations["runs.get"]
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   "/v1/budgets/upsert": {
     parameters: {
       query?: never
@@ -135,7 +35,7 @@ export interface paths {
     put?: never
     /**
      * create or update a budget
-     * @description Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it.
+     * @description Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it. Keys starting with unprice: are written by Unprice (a customer's subscription budget) and return 403.
      */
     post: operations["budgets.upsert"]
     delete?: never
@@ -395,7 +295,7 @@ export interface paths {
     put?: never
     /**
      * get current customer entitlements
-     * @description Get all active customer entitlements. Metered entitlements include live usage state from their entitlement windows.
+     * @description Get all active customer entitlements. Metered entitlements include their live limit, usage, and billing-period spend from the customer's subscription budget.
      */
     post: operations["access.entitlements.current"]
     delete?: never
@@ -414,8 +314,8 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * get current feature status
-     * @description Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.
+     * check whether a customer may use a feature
+     * @description Answer whether a feature is usable for a customer now. A metered feature answers from the customer's subscription budget with its live usage and limit; a flat, seat, or package feature answers from the customer's plan.
      */
     post: operations["access.check"]
     delete?: never
@@ -434,8 +334,8 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * ingest raw event
-     * @description Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.
+     * record usage that already happened
+     * @description Record up to 100 usage events. Each goes to its customer's subscription budget, which prices it at ingestion into the billing period that contains its occurredAt. Recorded usage always counts, even past a limit, because the work already ran; the limits it crossed come back in crossed. Events at most 1 day old are accepted. The answer has one result per event, in request order: a refused event carries the error a single call would return, and the others still count. An event naming a customer the API key cannot use is refused with FORBIDDEN (403), and an event whose budget could not be reached with UNAVAILABLE (503): retry it with the same idempotency key. A retry with the same idempotency key replays the first answer.
      */
     post: operations["usage.record"]
     delete?: never
@@ -454,27 +354,10 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * ingest raw event synchronously for a feature
-     * @description Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.
+     * consume usage if it fits
+     * @description Price one usage event in the customer's subscription budget and count it only if it fits every hard limit, before the work runs. A denial returns 402 with the limit that blocked it, or without details when a prepaid wallet cannot fund it. An event no rate matches returns 400 (NOT_PRICED), as does an event no metered feature takes (UNKNOWN_EVENT). A retry with the same idempotency key replays the first answer.
      */
     post: operations["usage.consume"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/ingestion-events/replay": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** replay failed ingestion events */
-    post: operations["ingestionEvents.replay"]
     delete?: never
     options?: never
     head?: never
@@ -672,7 +555,7 @@ export interface paths {
     put?: never
     /**
      * explain charge
-     * @description Explain one invoice line using ledger metadata and rated meter facts.
+     * @description Explain one invoice line using ledger metadata and journal events.
      */
     post: operations["analytics.charges.explain"]
     delete?: never
@@ -866,6 +749,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1024,6 +909,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1182,6 +1069,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1340,6 +1229,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1498,6 +1389,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1656,6 +1549,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1814,6 +1709,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1972,6 +1869,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -2130,6 +2029,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -2288,6 +2189,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -2414,713 +2317,6 @@ export interface operations {
         }
         content: {
           "application/json": Record<string, never>
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "runs.start": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The run configuration */
-    requestBody: {
-      content: {
-        "application/json": {
-          customerId?: string
-          /** @description Budget in currency minor units, usually cents. For USD, 5000 means $50.00. */
-          budgetAmountMinor: number
-          idempotencyKey: string
-          /** @enum {string|null} */
-          workloadType?: "agent" | "workflow" | "job" | "tool" | "custom" | null
-          workloadId?: string | null
-          traceId?: string | null
-          parentRunId?: string | null
-          metadata?: {
-            [key: string]: unknown
-          }
-          /** @description Expiration timestamp in epoch milliseconds. Defaults to one hour after the run starts and cannot exceed 24 hours after start. */
-          expiresAt?: number | null
-        }
-      }
-    }
-    responses: {
-      /** @description The budget run summary */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            runId: string
-            /** @enum {string} */
-            status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
-            /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
-            endedAt?: number | null
-            customerId: string
-            currency: string
-            /** @enum {string|null} */
-            workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-            workloadId: string | null
-            traceId: string | null
-            parentRunId: string | null
-            /** @description Budget in currency minor units (cents). */
-            budgetAmountMinor: number
-            /** @description Consumed in currency minor units (cents). */
-            consumedAmountMinor: number
-            /** @description Remaining in currency minor units (cents). */
-            remainingAmountMinor: number
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "runs.consume": {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        runId: string
-      }
-      cookie?: never
-    }
-    /** @description The sync event payload */
-    requestBody: {
-      content: {
-        "application/json": {
-          featureSlug: string
-          idempotencyKey: string
-          id?: string
-          eventSlug?: string
-          timestamp?: number
-          properties?: {
-            [key: string]: unknown
-          }
-        }
-      }
-    }
-    responses: {
-      /** @description The sync event decision */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            accepted: boolean
-            /** @enum {string} */
-            reason:
-              | "accepted"
-              | "duplicate"
-              | "insufficient_budget"
-              | "expired"
-              | "not_running"
-              | "entitlement_denied"
-            run: {
-              runId: string
-              /** @enum {string} */
-              status:
-                | "running"
-                | "completed"
-                | "expired"
-                | "canceled"
-                | "budget_exceeded"
-                | "failed"
-              /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
-              endedAt?: number | null
-              customerId: string
-              currency: string
-              /** @enum {string|null} */
-              workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-              workloadId: string | null
-              traceId: string | null
-              parentRunId: string | null
-              /** @description Budget in currency minor units (cents). */
-              budgetAmountMinor: number
-              /** @description Consumed in currency minor units (cents). */
-              consumedAmountMinor: number
-              /** @description Remaining in currency minor units (cents). */
-              remainingAmountMinor: number
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "runs.settle": {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        runId: string
-      }
-      cookie?: never
-    }
-    /** @description The incurred usage payload */
-    requestBody: {
-      content: {
-        "application/json": {
-          featureSlug: string
-          idempotencyKey: string
-          id?: string
-          eventSlug?: string
-          timestamp?: number
-          properties?: {
-            [key: string]: unknown
-          }
-        }
-      }
-    }
-    responses: {
-      /** @description The settlement decision */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            accepted: boolean
-            /** @enum {string} */
-            reason:
-              | "accepted"
-              | "duplicate"
-              | "insufficient_budget"
-              | "expired"
-              | "not_running"
-              | "entitlement_denied"
-            run: {
-              runId: string
-              /** @enum {string} */
-              status:
-                | "running"
-                | "completed"
-                | "expired"
-                | "canceled"
-                | "budget_exceeded"
-                | "failed"
-              /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
-              endedAt?: number | null
-              customerId: string
-              currency: string
-              /** @enum {string|null} */
-              workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-              workloadId: string | null
-              traceId: string | null
-              parentRunId: string | null
-              /** @description Budget in currency minor units (cents). */
-              budgetAmountMinor: number
-              /** @description Consumed in currency minor units (cents). */
-              consumedAmountMinor: number
-              /** @description Remaining in currency minor units (cents). */
-              remainingAmountMinor: number
-            }
-            /** @enum {string} */
-            fundingStatus?: "fully_funded" | "partially_funded" | "unfunded"
-            fundedAmountMinor?: number
-            unfundedAmountMinor?: number
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "runs.end": {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        runId: string
-      }
-      cookie?: never
-    }
-    /** @description The end run payload */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @default completed
-           * @enum {string}
-           */
-          status?: "completed" | "canceled" | "failed"
-        }
-      }
-    }
-    responses: {
-      /** @description The final budget run summary */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            runId: string
-            /** @enum {string} */
-            status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
-            /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
-            endedAt?: number | null
-            customerId: string
-            currency: string
-            /** @enum {string|null} */
-            workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-            workloadId: string | null
-            traceId: string | null
-            parentRunId: string | null
-            /** @description Budget in currency minor units (cents). */
-            budgetAmountMinor: number
-            /** @description Consumed in currency minor units (cents). */
-            consumedAmountMinor: number
-            /** @description Remaining in currency minor units (cents). */
-            remainingAmountMinor: number
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "runs.get": {
-    parameters: {
-      query?: {
-        project_id?: string
-      }
-      header?: never
-      path: {
-        runId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description The current budget run summary */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            runId: string
-            /** @enum {string} */
-            status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
-            /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
-            endedAt?: number | null
-            customerId: string
-            currency: string
-            /** @enum {string|null} */
-            workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-            workloadId: string | null
-            traceId: string | null
-            parentRunId: string | null
-            /** @description Budget in currency minor units (cents). */
-            budgetAmountMinor: number
-            /** @description Consumed in currency minor units (cents). */
-            consumedAmountMinor: number
-            /** @description Remaining in currency minor units (cents). */
-            remainingAmountMinor: number
-          }
         }
       }
       /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
@@ -3333,6 +2529,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
               }[]
               holds: {
                 defaultTtlMs: number
@@ -3363,6 +2561,8 @@ export interface operations {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -3611,6 +2811,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -3796,6 +2998,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -3956,6 +3160,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -4182,6 +3388,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -4363,6 +3571,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -4466,6 +3676,7 @@ export interface operations {
   "budgets.get": {
     parameters: {
       query: {
+        /** @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit. */
         key: string
       }
       header?: never
@@ -4508,6 +3719,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
               }[]
               holds: {
                 defaultTtlMs: number
@@ -4538,6 +3751,8 @@ export interface operations {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -4807,6 +4022,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -5069,6 +4286,8 @@ export interface operations {
                          * @enum {string}
                          */
                         enforce: "hard" | "soft"
+                        /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                        feature?: string
                         /** @description The limit */
                         amount: string
                         /** @description Used in the current period */
@@ -5116,6 +4335,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -5219,6 +4440,7 @@ export interface operations {
   "budgets.models": {
     parameters: {
       query: {
+        /** @description Comma-separated provider/model ids, for example openai/gpt-5 */
         ids: string
       }
       header?: never
@@ -5461,15 +4683,15 @@ export interface operations {
            */
           planSlug?: string
           /**
-           * @description The session id of the customer. This is used to track conversion from pricing pages
-           * @example sess_1234567890
-           */
-          sessionId?: string
-          /**
-           * @description The plan version the customer is signing up for
+           * @description The plan version the customer is signing up for, such as the one a pricing page CTA carries. Enterprise plan versions are refused.
            * @example pv_1234567890
            */
           planVersionId?: string
+          /**
+           * @description The pricing page the plan version was picked on, for conversion analytics. Ignored unless the page belongs to the project and lists the plan version
+           * @example page_1234567890
+           */
+          pageId?: string
           /**
            * @description The configuration of the subscription items. This is required if your features are quantity based when the customer needs to set them. Pass as empty if you want the system to automatically set the units from the plan defaults.
            * @example [
@@ -5856,7 +5078,7 @@ export interface operations {
             /** @enum {string} */
             overageStrategy: "none" | "last-call" | "always"
             metadata: {
-              [key: string]: (string | number | boolean | unknown | unknown) | undefined
+              [key: string]: (string | number | boolean | unknown) | undefined
             } | null
             featurePlanVersion: {
               id: string
@@ -5868,358 +5090,18 @@ export interface operations {
               type: "feature" | "addon"
               featureId: string
               /**
-               * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+               * @description The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
                * @enum {string}
                */
               featureType: "flat" | "tier" | "package" | "usage"
               /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
               unitOfMeasure: string
               /** @description Pricing configuration for this feature. Structure depends on featureType */
-              config:
-                | {
-                    /** @description Not used for flat pricing. Will be removed during validation */
-                    tiers?: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                    price: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description Not used for flat pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    usageMode?: "tier" | "package" | "unit"
-                    /**
-                     * @description Not used for flat pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
-                    /** @description Not used for flat pricing. Will be removed during validation */
-                    units?: number
-                  }
-                | {
-                    /** @description Base price for the feature. Not typically used in tier pricing mode */
-                    price?: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                     * @enum {string}
-                     */
-                    tierMode: "volume" | "graduated"
-                    /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                    tiers: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /**
-                     * @description Usage calculation mode. Not typically used in tier-type features
-                     * @enum {string}
-                     */
-                    usageMode?: "tier" | "package" | "unit"
-                    /** @description Number of units included. Not typically used in tier-type features */
-                    units?: number
-                  }
-                | {
-                    /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                    price?: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
-                     * @enum {string}
-                     */
-                    usageMode: "tier" | "package" | "unit"
-                    /**
-                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
-                    /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                    tiers?: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                    units?: number
-                  }
-                | {
-                    /** @description Not used for package pricing. Will be removed during validation */
-                    tiers?: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /** @description The price per package. Example: $10 per package of 100 API calls */
-                    price: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description Not used for package pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    usageMode?: "tier" | "package" | "unit"
-                    /**
-                     * @description Not used for package pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
-                    /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                    units: number
-                  }
+              config: {
+                /** @enum {string} */
+                usageMode?: "tier" | "package" | "unit"
+                units?: number
+              }
               /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
               billingConfig: {
                 name: string
@@ -6281,22 +5163,19 @@ export interface operations {
               defaultQuantity?: number | null
               /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
               limit?: number | null
+              /** @description Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000' */
+              included: string | null
               /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
               meterConfig?: {
                 eventId: string
                 eventSlug: string
                 /**
-                 * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                 * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                  * @enum {string}
                  */
-                aggregationMethod: "sum" | "count" | "max" | "latest"
+                aggregationMethod: "sum" | "count"
                 aggregationField?: string
-                filters?: {
-                  [key: string]: string | undefined
-                }
                 groupBy?: string[]
-                /** @enum {string} */
-                windowSize?: "MINUTE" | "HOUR" | "DAY"
               } | null
               feature: {
                 id: string
@@ -6313,17 +5192,12 @@ export interface operations {
                   eventId: string
                   eventSlug: string
                   /**
-                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                    * @enum {string}
                    */
-                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationMethod: "sum" | "count"
                   aggregationField?: string
-                  filters?: {
-                    [key: string]: string | undefined
-                  }
                   groupBy?: string[]
-                  /** @enum {string} */
-                  windowSize?: "MINUTE" | "HOUR" | "DAY"
                 } | null
               }
             }
@@ -6340,7 +5214,7 @@ export interface operations {
               effectiveAt: number
               expiresAt: number | null
               metadata: {
-                [key: string]: (string | number | boolean | unknown | unknown) | undefined
+                [key: string]: (string | number | boolean | unknown) | undefined
               } | null
             }[]
             subscriptionPhase?: {
@@ -6488,11 +5362,8 @@ export interface operations {
                     endAt: number | null
                   } | null
                   spending?: {
-                    currency: string
-                    displayAmount: string
-                    ledgerAmount: number
-                    /** @enum {number} */
-                    scale: 8
+                    unit: string
+                    amount: string
                   }
                 }
               | {
@@ -6614,105 +5485,48 @@ export interface operations {
            * @example tokens
            */
           featureSlug: string
-          /**
-           * @description Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.
-           * @example 1774094400000
-           */
-          timestamp?: number
         }
       }
     }
     responses: {
-      /** @description The current feature verification status */
+      /** @description The feature's access now */
       200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
+            /** @description The feature slug that was checked */
+            featureSlug: string
             /**
-             * @description Whether the feature is currently usable for the requested customer and timestamp
+             * @description Whether the customer may use the feature now
              * @example true
              */
             allowed: boolean
             /**
-             * @description The feature slug that was verified
-             * @example tokens
-             */
-            featureSlug: string
-            /**
-             * @description Why the feature is not usable. Omitted when allowed is true.
+             * @description Why the feature is not usable: NO_ENTITLEMENT (the customer's plan has no such feature, or its subscription budget does not exist yet), LIMIT_EXCEEDED (a hard limit has no room), or BUDGET_CLOSED (the subscription ended). Omitted when allowed is true.
              * @example LIMIT_EXCEEDED
              * @enum {string}
              */
-            rejectionReason?:
-              | "CUSTOMER_NOT_FOUND"
-              | "EVENT_TOO_OLD"
-              | "INVALID_ENTITLEMENT_CONFIGURATION"
-              | "INVALID_AGGREGATION_PROPERTIES"
-              | "LIMIT_EXCEEDED"
-              | "LATE_EVENT_CLOSED_PERIOD"
-              | "NO_MATCHING_ENTITLEMENT"
-              | "RUN_BUDGET_EXCEEDED"
-              | "UNROUTABLE_EVENT"
-              | "WALLET_EMPTY"
+            rejectionReason?: "NO_ENTITLEMENT" | "LIMIT_EXCEEDED" | "BUDGET_CLOSED"
+            /** @description True when the customer's subscription budget meters the feature: usage and limit are live */
+            metered: boolean
             /**
-             * @description Current usage in the active meter window. Present for usage features.
+             * @description Quantity used in the limit's current window. Present for a limited metered feature.
              * @example 42
              */
             usage?: number
             /**
-             * @description Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.
+             * @description The feature's quantity limit, or the subscribed quantity of a seat or package feature; null when unlimited
              * @example 100
              */
-            limit?: number | null
-            /** @description The single reset window represented by usage and limit. Null when active grants use different windows. */
-            quotaWindow?: {
-              /**
-               * @description Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.
-               * @example 1774137600000
-               */
-              endAt: number | null
-              /**
-               * @description The active reset-window key used by quota enforcement
-               * @example day:1774051200000
-               */
+            limit: number | null
+            /** @description The window the limit counts in: periodKey is the limit id, endAt (exclusive) is when it resets, null for a limit that never resets */
+            quotaWindow: {
               periodKey: string
-              /**
-               * @description Inclusive Unix-millisecond start of the active quota window
-               * @example 1774051200000
-               */
               startAt: number
+              endAt: number | null
             } | null
-            /** @description Current priced usage spend for usage-based features */
-            spending?: {
-              /**
-               * @description Current priced usage spend in ledger scale units
-               * @example 4200000000
-               */
-              ledgerAmount: number
-              /**
-               * @description ISO currency code for the spending amount
-               * @example USD
-               */
-              currency: string
-              /**
-               * @description Ready-to-render localized spending amount
-               * @example $42
-               */
-              displayAmount: string
-              /**
-               * @description Decimal scale for ledgerAmount
-               * @example 8
-               * @enum {number}
-               */
-              scale: 8
-            }
-            /**
-             * @description Optional detail about the verification result
-             * @example Unable to resolve the current meter window for this feature
-             */
-            message?: string
           }
         }
       }
@@ -6806,61 +5620,99 @@ export interface operations {
       path?: never
       cookie?: never
     }
-    /** @description The raw event ingestion payload */
+    /** @description The usage events */
     requestBody: {
       content: {
         "application/json": {
-          /**
-           * @description Optional event id. If omitted, the API will generate an internal event id for processing.
-           * @example evt_123
-           */
-          id?: string
-          /**
-           * @description Logical idempotency key for deduplicating raw events
-           * @example idem_123
-           */
-          idempotencyKey: string
-          /**
-           * @description The event slug
-           * @example tokens_used
-           */
-          eventSlug: string
-          /**
-           * @description The unprice customer id
-           * @example cus_123
-           */
-          customerId?: string
-          /**
-           * @description Event timestamp in epoch milliseconds, if not provided will use the time of the request
-           * @example 1741454800000
-           */
-          timestamp?: number
-          /**
-           * @description Arbitrary event properties
-           * @example {
-           *       "amount": 1
-           *     }
-           */
-          properties: {
-            [key: string]: unknown
-          }
+          /** @description 1 to 100 events */
+          events: {
+            /**
+             * @description The customer whose payer budget takes the event. Defaults to the API key's customer; required otherwise.
+             * @example cus_1H7KQFLr7RepUyQBKdnvY
+             */
+            customerId?: string
+            /**
+             * @description Up to 256 characters, usually the event id. A retry with the same key and the same event replays the first answer; the same key with another event is rejected with IDEMPOTENCY_CONFLICT.
+             * @example evt_01J9Z3
+             */
+            idempotencyKey: string
+            /**
+             * @description The event slug a metered feature of the customer's plan listens to
+             * @example llm_completion
+             */
+            eventSlug: string
+            /**
+             * @description The event's properties: flat strings, numbers, booleans, or null, at most 128 keys and 4 KB serialized. The meter reads the quantity and the dimensions (a model, a region) from them.
+             * @default {}
+             * @example {
+             *       "model": "gpt-4o",
+             *       "input_tokens": 1200,
+             *       "output_tokens": 300
+             *     }
+             */
+            properties?: {
+              [key: string]: (string | number | boolean | unknown) | undefined
+            }
+            /**
+             * @description When the usage happened, in epoch milliseconds: the event's own time, not the time of the call, so a retry replays. At most 1 day old and 5 minutes ahead. The usage counts in the billing period that contains it, or in the next open one when that period is already sealed.
+             * @example 1792000000000
+             */
+            occurredAt: number
+          }[]
         }
       }
     }
     responses: {
-      /** @description The raw event was accepted for asynchronous processing */
-      202: {
+      /** @description One result per event */
+      200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
-            /**
-             * @description The raw event was accepted for asynchronous processing
-             * @example true
-             * @enum {boolean}
-             */
-            accepted: true
+            /** @description Events accepted or replayed */
+            accepted: number
+            /** @description Events refused */
+            rejected: number
+            /** @description One result per event, in request order */
+            results: (
+              | {
+                  /** @enum {string} */
+                  status: "accepted"
+                  customerId: string
+                  idempotencyKey: string
+                  /** @description What the event costs, in the budget's unit, as priced at ingestion */
+                  amount: string
+                  /** @description Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result. */
+                  crossed: string[]
+                  /** @description True when this answer replays an earlier request instead of applying it again */
+                  replayed: boolean
+                }
+              | {
+                  /** @enum {string} */
+                  status: "rejected"
+                  customerId: string
+                  idempotencyKey: string
+                  error: {
+                    /**
+                     * @description The API error code a single call returns: BAD_REQUEST, FORBIDDEN, NOT_FOUND, or CONFLICT; UNAVAILABLE when the budget could not be reached
+                     * @example BAD_REQUEST
+                     */
+                    code: string
+                    /**
+                     * @description The HTTP status a single call returns
+                     * @example 400
+                     */
+                    status: number
+                    /**
+                     * @description Why the budget refused the event: NOT_PRICED (no rate row matches it), UNKNOWN_EVENT (no metered feature takes the slug), PERIOD_CLOSED (its billing period is sealed and none is open), NO_STATEMENT (no billing period covers it), TOO_LATE or INVALID_OCCURRED_AT (outside the accepted window), IDEMPOTENCY_CONFLICT, BUDGET_CLOSED, BUDGET_NOT_FOUND (the customer has no subscription budget yet), CUSTOMER_FORBIDDEN (the API key cannot use the customer), or BUDGET_UNAVAILABLE (the budget could not be reached; retry the event with the same idempotency key)
+                     * @example NOT_PRICED
+                     */
+                    reason: string
+                    message: string
+                  }
+                }
+            )[]
           }
         }
       }
@@ -6954,98 +5806,92 @@ export interface operations {
       path?: never
       cookie?: never
     }
-    /** @description The synchronous raw event ingestion payload */
+    /** @description The usage event */
     requestBody: {
       content: {
         "application/json": {
           /**
-           * @description Optional event id. If omitted, the API will generate an internal event id for processing.
-           * @example evt_123
-           */
-          id?: string
-          /**
-           * @description Logical idempotency key for deduplicating raw events
-           * @example idem_123
-           */
-          idempotencyKey: string
-          /**
-           * @description The event slug
-           * @example tokens_used
-           */
-          eventSlug: string
-          /**
-           * @description The unprice customer id
-           * @example cus_123
+           * @description The customer whose payer budget takes the event. Defaults to the API key's customer; required otherwise.
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
            */
           customerId?: string
           /**
-           * @description Event timestamp in epoch milliseconds, if not provided will use the time of the request
-           * @example 1741454800000
+           * @description Up to 256 characters, usually the event id. A retry with the same key and the same event replays the first answer; the same key with another event is rejected with IDEMPOTENCY_CONFLICT.
+           * @example evt_01J9Z3
            */
-          timestamp?: number
+          idempotencyKey: string
           /**
-           * @description Arbitrary event properties
+           * @description The event slug a metered feature of the customer's plan listens to
+           * @example llm_completion
+           */
+          eventSlug: string
+          /**
+           * @description The event's properties: flat strings, numbers, booleans, or null, at most 128 keys and 4 KB serialized. The meter reads the quantity and the dimensions (a model, a region) from them.
+           * @default {}
            * @example {
-           *       "amount": 1
+           *       "model": "gpt-4o",
+           *       "input_tokens": 1200,
+           *       "output_tokens": 300
            *     }
            */
-          properties: {
-            [key: string]: unknown
+          properties?: {
+            [key: string]: (string | number | boolean | unknown) | undefined
           }
-          /**
-           * @description The feature slug to verify and ingest synchronously
-           * @example tokens
-           */
-          featureSlug: string
         }
       }
     }
     responses: {
-      /** @description The synchronous ingestion result for the targeted feature */
+      /** @description The consumed usage */
       200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
-            /**
-             * @description Whether the event was accepted and synchronously ingested for the feature
-             * @example true
-             */
-            allowed: boolean
-            /**
-             * @description Synchronous ingestion lifecycle state for the targeted feature
-             * @example processed
-             * @enum {string}
-             */
-            state: "processed" | "rejected"
-            /**
-             * @description Whether this request applied a new idempotency key or replayed a previously reported event
-             * @example already_reported
-             * @enum {string}
-             */
-            idempotencyStatus: "new" | "already_reported"
-            /**
-             * @description Business rejection reason when the event could not be ingested
-             * @example LIMIT_EXCEEDED
-             * @enum {string}
-             */
-            rejectionReason?:
-              | "CUSTOMER_NOT_FOUND"
-              | "EVENT_TOO_OLD"
-              | "INVALID_ENTITLEMENT_CONFIGURATION"
-              | "INVALID_AGGREGATION_PROPERTIES"
-              | "LIMIT_EXCEEDED"
-              | "LATE_EVENT_CLOSED_PERIOD"
-              | "NO_MATCHING_ENTITLEMENT"
-              | "RUN_BUDGET_EXCEEDED"
-              | "UNROUTABLE_EVENT"
-              | "WALLET_EMPTY"
-            /**
-             * @description Optional details about the synchronous ingestion result
-             * @example Limit exceeded for meter meter_123
-             */
-            message?: string
+            /** @enum {boolean} */
+            allowed: true
+            customerId: string
+            /** @description What the event costs, in the budget's unit, as priced at ingestion */
+            amount: string
+            /** @description Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result. */
+            crossed: string[]
+            /** @description True when this answer replays an earlier request instead of applying it again */
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description The sum of open holds and the unreported part of open leases */
+              held: string
+              limits: {
+                id: string
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
+                 * @example hard
+                 * @enum {string}
+                 */
+                enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
+                /** @description The limit */
+                amount: string
+                /** @description Used in the current period */
+                consumed: string
+                /** @description Held by open holds and leases */
+                held: string
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
+                remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
+                resetsAt: number | null
+              }[]
+              /** @description When this balance was computed, in epoch milliseconds */
+              asOf: number
+            }
           }
         }
       }
@@ -7067,116 +5913,13 @@ export interface operations {
           "application/json": components["schemas"]["ErrUnauthorized"]
         }
       }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
+      /** @description The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through. */
+      402: {
         headers: {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "ingestionEvents.replay": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Replay failed ingestion events */
-    requestBody: {
-      content: {
-        "application/json": {
-          canonical_audit_ids: string[]
-          project_id?: string
-        }
-      }
-    }
-    responses: {
-      /** @description Replay result */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            replayed: number
-            skipped: number
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
+          "application/json": components["schemas"]["ErrBudgetExceeded"]
         }
       }
       /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
@@ -7273,17 +6016,12 @@ export interface operations {
                 eventId: string
                 eventSlug: string
                 /**
-                 * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                 * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                  * @enum {string}
                  */
-                aggregationMethod: "sum" | "count" | "max" | "latest"
+                aggregationMethod: "sum" | "count"
                 aggregationField?: string
-                filters?: {
-                  [key: string]: string | undefined
-                }
                 groupBy?: string[]
-                /** @enum {string} */
-                windowSize?: "MINUTE" | "HOUR" | "DAY"
               } | null
             }[]
           }
@@ -7377,6 +6115,7 @@ export interface operations {
       query?: never
       header?: never
       path: {
+        /** @description The invoice ID */
         invoiceId: string
       }
       cookie?: never
@@ -7436,7 +6175,13 @@ export interface operations {
               settlement_status: "due" | "paid" | "included"
               wallet_credit_id: string | null
               /** @enum {string|null} */
-              wallet_credit_source: "promo" | "plan_included" | "trial" | "manual" | "credit_line"
+              wallet_credit_source:
+                | "promo"
+                | "plan_included"
+                | "trial"
+                | "manual"
+                | "credit_line"
+                | null
               wallet_id: string | null
               /** @enum {string} */
               currency: "USD" | "EUR"
@@ -7553,16 +6298,13 @@ export interface operations {
             }[]
             /** @default [] */
             features?: {
-              /** @description URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members' */
+              /** @description Unique identifier for the feature: lowercase letters, digits, hyphens and underscores, at most 64 characters. Used for API lookups, rate card rows, and budget limits. Example: 'api-calls', 'storage_gb', 'team-members' */
               slug: string
               /** @description Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members' */
               title: string
               /** @description Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period' */
               description?: string | null
-              /**
-               * @description Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified
-               * @default units
-               */
+              /** @description Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified */
               unitOfMeasure?: string
             }[]
             plans: {
@@ -7607,45 +6349,39 @@ export interface operations {
                    * @enum {string}
                    */
                   featureType: "flat" | "tier" | "package" | "usage"
-                  /** @description Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero */
+                  /** @description Pricing configuration. Prices are decimal strings and become rows of the plan version's rate card */
                   config: {
-                    /** @description Price as a decimal string. Example: '0.000002' */
-                    price?: string
                     /**
-                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                     * @description How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price
                      * @enum {string}
                      */
                     usageMode?: "tier" | "package" | "unit"
-                    /**
-                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
+                    /** @description Units in a package when usageMode is 'package'. Example: 100 */
+                    units?: number
+                    /** @description Price as a decimal string. Example: '0.000002' */
+                    price?: string
                     /** @description Pricing tiers, decimal strings */
                     tiers?: {
+                      /** @description The first unit of this tier, inclusive. 1 for the first tier */
+                      firstUnit: number
+                      /** @description The last unit of this tier, inclusive; null for the last tier */
+                      lastUnit: number | null
                       /** @description Price per unit inside this tier, as a decimal string */
                       unitPrice: string
                       /** @description Fixed price for entering this tier, as a decimal string */
                       flatPrice: string
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
                     }[]
-                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                    units?: number
                   }
                   /** @description How usage is measured from a declared event */
                   meterConfig?: {
                     eventSlug: string
                     /**
-                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                      * @enum {string}
                      */
-                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationMethod: "sum" | "count"
                     aggregationField?: string
+                    groupBy?: string[]
                   }
                   /** @description Maximum usage per reset window. Omit for unlimited */
                   limit?: number | string
@@ -7843,16 +6579,13 @@ export interface operations {
               }[]
               /** @default [] */
               features?: {
-                /** @description URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members' */
+                /** @description Unique identifier for the feature: lowercase letters, digits, hyphens and underscores, at most 64 characters. Used for API lookups, rate card rows, and budget limits. Example: 'api-calls', 'storage_gb', 'team-members' */
                 slug: string
                 /** @description Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members' */
                 title: string
                 /** @description Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period' */
                 description?: string | null
-                /**
-                 * @description Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified
-                 * @default units
-                 */
+                /** @description Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified */
                 unitOfMeasure?: string
               }[]
               plans: {
@@ -7897,45 +6630,39 @@ export interface operations {
                      * @enum {string}
                      */
                     featureType: "flat" | "tier" | "package" | "usage"
-                    /** @description Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero */
+                    /** @description Pricing configuration. Prices are decimal strings and become rows of the plan version's rate card */
                     config: {
-                      /** @description Price as a decimal string. Example: '0.000002' */
-                      price?: string
                       /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                       * @description How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
+                      /** @description Units in a package when usageMode is 'package'. Example: 100 */
+                      units?: number
+                      /** @description Price as a decimal string. Example: '0.000002' */
+                      price?: string
                       /** @description Pricing tiers, decimal strings */
                       tiers?: {
+                        /** @description The first unit of this tier, inclusive. 1 for the first tier */
+                        firstUnit: number
+                        /** @description The last unit of this tier, inclusive; null for the last tier */
+                        lastUnit: number | null
                         /** @description Price per unit inside this tier, as a decimal string */
                         unitPrice: string
                         /** @description Fixed price for entering this tier, as a decimal string */
                         flatPrice: string
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
                       }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
                     }
                     /** @description How usage is measured from a declared event */
                     meterConfig?: {
                       eventSlug: string
                       /**
-                       * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                       * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                        * @enum {string}
                        */
-                      aggregationMethod: "sum" | "count" | "max" | "latest"
+                      aggregationMethod: "sum" | "count"
                       aggregationField?: string
+                      groupBy?: string[]
                     }
                     /** @description Maximum usage per reset window. Omit for unlimited */
                     limit?: number | string
@@ -7985,7 +6712,6 @@ export interface operations {
                 | "enforcement_settings_dropped"
                 | "version_settings_dropped"
                 | "feature_settings_dropped"
-                | "meter_fields_dropped"
               message: string
             }[]
             /** @description Null when the project has no plans to integrate against */
@@ -8381,6 +7107,7 @@ export interface operations {
       query?: never
       header?: never
       path: {
+        /** @description The plan version id */
         planVersionId: string
       }
       cookie?: never
@@ -8408,7 +7135,7 @@ export interface operations {
               tags: string[] | null
               active: boolean | null
               /** @enum {string|null} */
-              status: "draft" | "published"
+              status: "draft" | "published" | null
               publishedAt: number | null
               publishedBy: string | null
               archived: boolean | null
@@ -8480,358 +7207,18 @@ export interface operations {
                 type: "feature" | "addon"
                 featureId: string
                 /**
-                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+                 * @description The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
                  * @enum {string}
                  */
                 featureType: "flat" | "tier" | "package" | "usage"
                 /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
                 unitOfMeasure: string
                 /** @description Pricing configuration for this feature. Structure depends on featureType */
-                config:
-                  | {
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      units?: number
-                    }
-                  | {
-                      /** @description Base price for the feature. Not typically used in tier pricing mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                       * @enum {string}
-                       */
-                      tierMode: "volume" | "graduated"
-                      /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                      tiers: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /**
-                       * @description Usage calculation mode. Not typically used in tier-type features
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included. Not typically used in tier-type features */
-                      units?: number
-                    }
-                  | {
-                      /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
-                       * @enum {string}
-                       */
-                      usageMode: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
-                    }
-                  | {
-                      /** @description Not used for package pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The price per package. Example: $10 per package of 100 API calls */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                      units: number
-                    }
+                config: {
+                  /** @enum {string} */
+                  usageMode?: "tier" | "package" | "unit"
+                  units?: number
+                }
                 /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
                 billingConfig: {
                   name: string
@@ -8893,25 +7280,24 @@ export interface operations {
                 defaultQuantity?: number | null
                 /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                 limit?: number | null
+                /** @description Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000' */
+                included: string | null
                 /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
                 meterConfig?: {
                   eventId: string
                   eventSlug: string
                   /**
-                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                    * @enum {string}
                    */
-                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationMethod: "sum" | "count"
                   aggregationField?: string
-                  filters?: {
-                    [key: string]: string | undefined
-                  }
                   groupBy?: string[]
-                  /** @enum {string} */
-                  windowSize?: "MINUTE" | "HOUR" | "DAY"
                 } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
+                /** @description The feature's current price from the plan version's rate card, formatted for display. Example: '$0.02 / call'. Null when the card has no row for the feature */
+                displayPrice: string | null
                 /** @description The feature information */
                 feature: {
                   id: string
@@ -8928,17 +7314,12 @@ export interface operations {
                     eventId: string
                     eventSlug: string
                     /**
-                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                      * @enum {string}
                      */
-                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationMethod: "sum" | "count"
                     aggregationField?: string
-                    filters?: {
-                      [key: string]: string | undefined
-                    }
                     groupBy?: string[]
-                    /** @enum {string} */
-                    windowSize?: "MINUTE" | "HOUR" | "DAY"
                   } | null
                 }
               }[]
@@ -9100,7 +7481,7 @@ export interface operations {
               tags: string[] | null
               active: boolean | null
               /** @enum {string|null} */
-              status: "draft" | "published"
+              status: "draft" | "published" | null
               publishedAt: number | null
               publishedBy: string | null
               archived: boolean | null
@@ -9172,358 +7553,18 @@ export interface operations {
                 type: "feature" | "addon"
                 featureId: string
                 /**
-                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+                 * @description The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
                  * @enum {string}
                  */
                 featureType: "flat" | "tier" | "package" | "usage"
                 /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
                 unitOfMeasure: string
                 /** @description Pricing configuration for this feature. Structure depends on featureType */
-                config:
-                  | {
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      units?: number
-                    }
-                  | {
-                      /** @description Base price for the feature. Not typically used in tier pricing mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                       * @enum {string}
-                       */
-                      tierMode: "volume" | "graduated"
-                      /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                      tiers: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /**
-                       * @description Usage calculation mode. Not typically used in tier-type features
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included. Not typically used in tier-type features */
-                      units?: number
-                    }
-                  | {
-                      /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
-                       * @enum {string}
-                       */
-                      usageMode: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
-                    }
-                  | {
-                      /** @description Not used for package pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The price per package. Example: $10 per package of 100 API calls */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                      units: number
-                    }
+                config: {
+                  /** @enum {string} */
+                  usageMode?: "tier" | "package" | "unit"
+                  units?: number
+                }
                 /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
                 billingConfig: {
                   name: string
@@ -9585,25 +7626,24 @@ export interface operations {
                 defaultQuantity?: number | null
                 /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                 limit?: number | null
+                /** @description Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000' */
+                included: string | null
                 /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
                 meterConfig?: {
                   eventId: string
                   eventSlug: string
                   /**
-                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                    * @enum {string}
                    */
-                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationMethod: "sum" | "count"
                   aggregationField?: string
-                  filters?: {
-                    [key: string]: string | undefined
-                  }
                   groupBy?: string[]
-                  /** @enum {string} */
-                  windowSize?: "MINUTE" | "HOUR" | "DAY"
                 } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
+                /** @description The feature's current price from the plan version's rate card, formatted for display. Example: '$0.02 / call'. Null when the card has no row for the feature */
+                displayPrice: string | null
                 /** @description The feature information */
                 feature: {
                   id: string
@@ -9620,17 +7660,12 @@ export interface operations {
                     eventId: string
                     eventSlug: string
                     /**
-                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                      * @enum {string}
                      */
-                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationMethod: "sum" | "count"
                     aggregationField?: string
-                    filters?: {
-                      [key: string]: string | undefined
-                    }
                     groupBy?: string[]
-                    /** @enum {string} */
-                    windowSize?: "MINUTE" | "HOUR" | "DAY"
                   } | null
                 }
               }[]
@@ -9893,7 +7928,7 @@ export interface operations {
                 tags: string[] | null
                 active: boolean | null
                 /** @enum {string|null} */
-                status: "draft" | "published"
+                status: "draft" | "published" | null
                 publishedAt: number | null
                 publishedBy: string | null
                 archived: boolean | null
@@ -10077,7 +8112,6 @@ export interface operations {
               event_count: number
               total_usage: number
               total_amount: number
-              latest_amount_after: number
               currency: string
               amount_scale: number
               first_event_at: number | null
@@ -10087,7 +8121,6 @@ export interface operations {
             pricing: {
               feature_type: string
               usage_mode: string | null
-              tier_mode: string | null
               unit_of_measure: string
               description: string
               rows: {
@@ -10096,33 +8129,21 @@ export interface operations {
               }[]
             }
             events: {
-              event_id: string
               idempotency_key: string
-              customer_entitlement_id: string
-              grant_id: string
-              feature_plan_version_id: string | null
               feature_slug: string
               period_key: string
               event_slug: string
-              aggregation_method: string
               /** @description timestamp of the ingested event */
               timestamp: number
-              /** @description timestamp of when the fact row was created */
+              /** @description timestamp of when the budget operation was created */
               created_at: number
               delta: number
-              value_after: number
               amount: number
-              amount_after: number
               /** @enum {number} */
               amount_scale: 8
               currency: string
-              priced_at: number
-              tier_index: number | null
-              tier_mode: ("volume" | "graduated") | unknown | unknown
               pricing_component_count: number
-              /** @enum {string} */
-              source_type: "api_key" | "system" | "unknown"
-              source_id: string
+              operation_id: string
             }[]
             answer: string
             /** @enum {string} */
@@ -10136,7 +8157,6 @@ export interface operations {
               /** @enum {string} */
               type:
                 | "event"
-                | "meter_fact"
                 | "ingestion_status"
                 | "ledger_line"
                 | "billing_period"
@@ -10144,7 +8164,7 @@ export interface operations {
                 | "plan_version"
               id: string
               /** @enum {string} */
-              source: "tinybird" | "r2" | "ledger" | "postgres"
+              source: "r2" | "budget" | "ledger" | "postgres"
               timestamp: number | null
             }[]
             warnings: string[]
@@ -10256,12 +8276,12 @@ export interface operations {
           to_ts: number
           cursor?: {
             handledAt: number
-            canonicalAuditId: string
+            operationId: string
+            budgetKey: string
           } | null
-          source_id?: string
           event_slug?: string
           /** @enum {string} */
-          state?: "processed" | "rejected" | "failed"
+          state?: "processed" | "rejected"
           /** @default 50 */
           limit?: number
         }
@@ -10282,7 +8302,6 @@ export interface operations {
             totals: {
               processed: number
               rejected: number
-              failed: number
               total: number
             }
             successRate: number
@@ -10297,47 +8316,32 @@ export interface operations {
               second: string
               processed: number
               rejected: number
-              failed: number
               total: number
             }[]
             rejections: {
               rejectionReason: string | null
               eventSlug: string
-              sourceId: string
               sourceType: string
               eventCount: number
               lastSeenAt: number
             }[]
             recentEvents: {
               eventId: string
-              canonicalAuditId: string
               customerId: string
               eventSlug: string
               sourceType: string
-              sourceId: string
-              /** @enum {string|null} */
-              ingestionMode: "async" | "sync" | "run"
-              runId: string | null
-              traceId: string | null
-              parentRunId: string | null
-              /** @enum {string|null} */
-              workloadType: "agent" | "workflow" | "job" | "tool" | "custom"
-              workloadId: string | null
               /** @enum {string} */
-              state: "processed" | "rejected" | "failed"
+              state: "processed" | "rejected"
               rejectionReason: string | null
-              failureStage: string | null
-              failureReason: string | null
-              failureMessage: string | null
-              replayable: boolean
               timestamp: number
-              receivedAt: number
               handledAt: number
+              operationId: string
+              budgetKey: string
             }[]
             facets: {
               states: {
                 /** @enum {string} */
-                value: "processed" | "rejected" | "failed"
+                value: "processed" | "rejected"
                 count: number
               }[]
               eventSlugs: {
@@ -10359,7 +8363,8 @@ export interface operations {
             }
             nextCursor: {
               handledAt: number
-              canonicalAuditId: string
+              operationId: string
+              budgetKey: string
             } | null
             answer: string
             /** @enum {string} */
@@ -10368,7 +8373,6 @@ export interface operations {
               /** @enum {string} */
               type:
                 | "event"
-                | "meter_fact"
                 | "ingestion_status"
                 | "ledger_line"
                 | "billing_period"
@@ -10376,7 +8380,7 @@ export interface operations {
                 | "plan_version"
               id: string
               /** @enum {string} */
-              source: "tinybird" | "r2" | "ledger" | "postgres"
+              source: "r2" | "budget" | "ledger" | "postgres"
               timestamp: number | null
             }[]
             warnings: string[]
@@ -10516,6 +8520,11 @@ export interface operations {
                 display_amount: string
               }
             }[]
+            /**
+             * @description Events that fed more than 8 features. Their features past the 8th are not in usage; 0 when every event is counted in full.
+             * @example 0
+             */
+            truncated_events: number
           }
         }
       }
@@ -10737,7 +8746,9 @@ export interface operations {
   "wallet.balance": {
     parameters: {
       query: {
+        /** @description The customer ID */
         customerId: string
+        /** @description The project ID */
         projectId?: string
       }
       header?: never
@@ -10881,11 +8892,14 @@ export interface operations {
   "walletCredits.balance": {
     parameters: {
       query: {
+        /** @description The customer ID */
         customerId: string
+        /** @description The project ID */
         projectId?: string
       }
       header?: never
       path: {
+        /** @description The wallet credit ID returned in the wallet balance credits array */
         walletId: string
       }
       cookie?: never

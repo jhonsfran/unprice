@@ -10,7 +10,8 @@ import { openApiBudgetErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { runBudgetVerb, toWire } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { balanceToWire, toWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -44,7 +45,11 @@ export const registerLeaseBudgetV1 = (app: App) =>
     const {
       type: _,
       created,
+      balance,
       ...leased
     } = await runBudgetVerb(c, key, { type: "lease", ...request })
-    return c.json({ ...toWire(leased), created: created !== null }, HttpStatusCodes.OK)
+    return c.json(
+      { ...toWire(leased), balance: balanceToWire(balance), created: created !== null },
+      HttpStatusCodes.OK
+    )
   })

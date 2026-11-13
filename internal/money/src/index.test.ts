@@ -18,8 +18,8 @@ import {
 
 // All assertions encode LEDGER_SCALE=8. Bumping the scale is a deliberate
 // data-model change: if a test here breaks after editing LEDGER_SCALE, that's
-// the fixtures telling you every ledger row, outbox payload, and Tinybird
-// column interprets amounts at the new scale.
+// the fixtures telling you every ledger row, outbox payload, and budget
+// journal column interprets amounts at the new scale.
 describe("money", () => {
   describe("toLedgerAmount", () => {
     it("normalizes scale-2 USD to scale-8 decimal string", () => {

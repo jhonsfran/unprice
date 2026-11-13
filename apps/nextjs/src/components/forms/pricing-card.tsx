@@ -5,8 +5,9 @@ import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Typography } from "@unprice/ui/typography"
-import { PlanVersionPublish } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/plan-version-actions"
 import { PlanVersionPricingCard } from "~/components/billing/plan-version-pricing-card"
+import { PlanVersionPublish } from "~/components/pricing/plan-version-publish"
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
 
 export function PricingCard({
   planVersion,
@@ -20,12 +21,14 @@ export function PricingCard({
   /** Render the Publish CTA when the version is a draft. Set false when Publish lives elsewhere (e.g., the page header). */
   showPublish?: boolean
 }) {
+  const { rows } = useVersionPricing(planVersion?.id, planVersion?.currency)
   if (!planVersion) return null
 
   return (
     <PlanVersionPricingCard
       planVersion={planVersion}
       className={className}
+      priceRows={rows}
       action={
         showPublish && planVersion.status !== "published"
           ? { kind: "publish", onPublish }
@@ -34,7 +37,12 @@ export function PricingCard({
       renderAction={(action) => {
         if (action.kind === "publish") {
           return (
-            <PlanVersionPublish planVersionId={planVersion.id} onConfirmAction={action.onPublish} />
+            <PlanVersionPublish
+              planVersionId={planVersion.id}
+              currency={planVersion.currency}
+              features={planVersion.planFeatures}
+              onConfirmAction={action.onPublish}
+            />
           )
         }
 

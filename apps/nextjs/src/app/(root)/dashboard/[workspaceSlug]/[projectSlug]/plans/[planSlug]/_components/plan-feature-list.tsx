@@ -1,14 +1,12 @@
 "use client"
 
-import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
-import { FileStack, Search } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { FileStack } from "lucide-react"
+import { useEffect, useMemo, useRef } from "react"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Input } from "@unprice/ui/input"
 import { Separator } from "@unprice/ui/separator"
-
 import { Typography } from "@unprice/ui/typography"
+
 import { useHydrateAtoms } from "jotai/utils"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import {
@@ -19,8 +17,9 @@ import {
   useActivePlanVersion,
   usePlanFeaturesList,
 } from "~/hooks/use-features"
-import { DroppableContainer } from "../../_components/droppable"
-import { SortableFeature } from "../../_components/sortable-feature"
+import { AddFeatureCommand } from "./add-feature-command"
+import { FeatureSheet } from "./feature-sheet"
+import { FeatureTable } from "./feature-table"
 
 interface PlanFeatureListProps {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
@@ -28,9 +27,8 @@ interface PlanFeatureListProps {
 
 const EMPTY_FEATURES: never[] = []
 
+/** The editor's middle pane: the attached features as a table, with the palette and the sheet. */
 export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
-  const [filter, setFilter] = useState("")
-
   // Use stable references for derived values to prevent unnecessary effect re-runs.
   // Track version identity to only re-sync atoms when the version actually changes.
   const versionId = planVersion?.id
@@ -70,63 +68,36 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
 
   if (!planVersion) return null
 
-  const filteredFeatures =
-    featuresList.filter((feature) =>
-      feature.feature.title.toLowerCase().includes(filter.toLowerCase())
-    ) ?? featuresList
+  const isPublished = planVersion.status === "published"
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-[70px] items-center justify-between space-x-1 px-4 py-2">
-        <Typography variant="h4">Plan-version features</Typography>
+      <div className="flex h-[70px] items-center justify-between gap-3 px-4 py-2">
+        <Typography variant="h4">Features</Typography>
+        {!isPublished && <AddFeatureCommand planVersion={planVersion} />}
       </div>
       <Separator />
-      <div className="bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="relative">
-          <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Search attached features"
-            className="pl-8"
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        </div>
-      </div>
       <div
         data-feature-scroll
-        className="hide-scrollbar flex max-h-[60vh] min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-4 pt-1 lg:max-h-none"
+        className="hide-scrollbar flex max-h-[60vh] min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain lg:max-h-none"
       >
-        <DroppableContainer id={"planVersionFeaturesList"}>
-          <SortableContext
-            items={featuresList.map((feature) => feature.featureId)}
-            strategy={verticalListSortingStrategy}
-          >
-            {filteredFeatures.length === 0 ? (
-              <EmptyPlaceholder className="flex h-full min-h-[480px] flex-1">
-                <EmptyPlaceholder.Icon>
-                  <FileStack className="h-8 w-8" />
-                </EmptyPlaceholder.Icon>
-                <EmptyPlaceholder.Title>No features yet</EmptyPlaceholder.Title>
-                <EmptyPlaceholder.Description>
-                  Pick a feature from the library, then configure its meter, entitlement, and
-                  billing behavior for this plan version.
-                </EmptyPlaceholder.Description>
-              </EmptyPlaceholder>
-            ) : (
-              <div className="space-y-2">
-                {filteredFeatures.map((feature) => (
-                  <SortableFeature
-                    disabled={activePlanVersion?.status === "published"}
-                    key={feature.featureId}
-                    mode="FeaturePlan"
-                    planFeatureVersion={feature}
-                  />
-                ))}
-              </div>
-            )}
-          </SortableContext>
-        </DroppableContainer>
+        {featuresList.length === 0 ? (
+          <EmptyPlaceholder className="m-4 flex min-h-[480px] flex-1">
+            <EmptyPlaceholder.Icon>
+              <FileStack className="h-8 w-8" />
+            </EmptyPlaceholder.Icon>
+            <EmptyPlaceholder.Title>No features yet</EmptyPlaceholder.Title>
+            <EmptyPlaceholder.Description>
+              {isPublished
+                ? "This version was published without features."
+                : "Add a feature to start. Its kind, limit, included units and price are set in the table; the meter, tiers and cadences open in a sheet."}
+            </EmptyPlaceholder.Description>
+          </EmptyPlaceholder>
+        ) : (
+          <FeatureTable />
+        )}
       </div>
+      <FeatureSheet />
     </div>
   )
 }

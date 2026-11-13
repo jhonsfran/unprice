@@ -1,5 +1,5 @@
 import { getSession } from "@unprice/auth/server-rsc"
-import { COOKIES_APP } from "@unprice/config"
+import { attributionIdSchema } from "@unprice/db/validators"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
@@ -9,6 +9,7 @@ import LayoutLoader from "~/components/layout/layout-loader"
 import {
   SIGNUP_INTENT_COOKIE,
   type SignupIntent,
+  getSingleSearchParam,
   intentLanding,
   resolveSignupIntent,
   workspaceLanding,
@@ -18,15 +19,20 @@ import NewWorkspaceForm from "../_components/new-workspace-form"
 import Redirect from "./_components/redirect"
 
 export default async function NewPage(props: {
-  searchParams: Promise<{
-    workspace_id?: string
-    intent?: string | string[]
-  }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const [{ workspace_id, intent }, cookieStore] = await Promise.all([props.searchParams, cookies()])
-  const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
+  const [query, cookieStore] = await Promise.all([props.searchParams, cookies()])
+  const workspace_id = getSingleSearchParam(query.workspace_id)
+  // A malformed id is dropped here: the workspace form would reject it with nothing to correct.
+  const attributionId = (value: string | undefined) => attributionIdSchema.safeParse(value).data
+  const planVersionId = attributionId(getSingleSearchParam(query.planVersionId))
+  // A page is attribution for a picked plan only.
+  const pageId = planVersionId ? attributionId(getSingleSearchParam(query.pageId)) : undefined
   // The query carries the intent through auth; the signup cookie covers a round trip that lost it.
-  const signupIntent = resolveSignupIntent(intent, cookieStore.get(SIGNUP_INTENT_COOKIE)?.value)
+  const signupIntent = resolveSignupIntent(
+    query.intent,
+    cookieStore.get(SIGNUP_INTENT_COOKIE)?.value
+  )
 
   // A visitor whose intent has its own landing and who already runs a workspace goes there, not
   // to another workspace. Only a workspace they own or administer: an invited member cannot set up
@@ -43,27 +49,14 @@ export default async function NewPage(props: {
     }
   }
 
-  if (!sessionId) {
-    return (
-      <Suspense fallback={<LayoutLoader />}>
-        <Content workspaceId={workspace_id} intent={signupIntent} />
-      </Suspense>
-    )
-  }
-
-  const { planClick } = await api.analytics.getPlanClickBySessionId({
-    session_id: sessionId,
-    action: "plan_click",
-  })
-
-  const session = planClick?.at(0) ?? null
-
+  // The pricing CTA carries the clicked plan version and page; sign-up checks both belong to the
+  // project.
   return (
     <Suspense fallback={<LayoutLoader />}>
       <Content
         workspaceId={workspace_id}
-        planVersionId={session?.payload.plan_version_id}
-        sessionId={session ? sessionId : undefined}
+        planVersionId={planVersionId}
+        pageId={pageId}
         intent={signupIntent}
       />
     </Suspense>
@@ -73,12 +66,12 @@ export default async function NewPage(props: {
 async function Content({
   workspaceId,
   planVersionId,
-  sessionId,
+  pageId,
   intent,
 }: {
   workspaceId?: string
   planVersionId?: string
-  sessionId?: string
+  pageId?: string
   intent?: SignupIntent
 }) {
   if (!workspaceId || workspaceId === "") {
@@ -98,9 +91,9 @@ async function Content({
                 defaultValues={{
                   name: "",
                   planVersionId,
+                  pageId,
                   successUrl: "",
                   cancelUrl: "",
-                  sessionId: sessionId,
                 }}
               />
             </CardContent>

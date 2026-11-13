@@ -42,6 +42,7 @@ export const billingTask = task({
 
     try {
       const billingResult = await context.services.billing.billingInvoice({
+        caller: "job",
         projectId,
         subscriptionId,
         invoiceId,

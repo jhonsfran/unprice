@@ -1,1 +1,0 @@
-ALTER TABLE `run_state` ADD `reconciliation_needed` integer DEFAULT false NOT NULL;

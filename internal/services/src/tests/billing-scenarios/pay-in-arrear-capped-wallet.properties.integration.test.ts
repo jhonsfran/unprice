@@ -5,9 +5,8 @@ import { toLedgerMinor } from "@unprice/money"
 import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -91,13 +90,13 @@ async function loadSubscriptionContext(): Promise<SubscriptionContext> {
 function expectedEventsAmount(usage: number) {
   if (usage <= 0) return 0
 
-  // The seeded arrears plan uses volume tiers:
-  // 1..1000 => 1 EUR flat + 0.001 EUR/unit, 1001+ => 0.10 EUR/unit.
+  // The seeded arrears plan uses graduated tiers:
+  // 1..1000 => 1 EUR flat + 0.001 EUR/unit; 1001+ => 1 EUR for the first 1000 units + 0.10 EUR/unit above, no flat.
   if (usage <= 1000) {
     return 100_000_000 + usage * 100_000
   }
 
-  return usage * 10_000_000
+  return 100_000_000 + (usage - 1000) * 10_000_000
 }
 
 async function runCappedWalletPropertyCase(usage: number) {
@@ -110,13 +109,8 @@ async function runCappedWalletPropertyCase(usage: number) {
   const logger = createLogger()
   const ledger = new LedgerGateway({ db, logger })
   const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
-  })
-  const rating = new RatingService({
-    logger,
-    analytics,
-    grantsManager: new GrantsManager({ db, logger }),
   })
   const repo = new DrizzleSubscriptionRepository(db)
   const services = {
@@ -125,7 +119,10 @@ async function runCappedWalletPropertyCase(usage: number) {
     subscriptions: {},
   } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
 
-  const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+  const activationInputs = await deriveActivationInputsFromPlan(
+    { db, rateCards: testInvoicing({ db }).rateCards },
+    { projectId, subscriptionId }
+  )
   expect(activationInputs).toEqual({
     creditLinePolicy: "capped",
     grants: [{ amount: creditLineAmount, reason: "Period usage allowance", source: "credit_line" }],
@@ -207,21 +204,19 @@ async function runCappedWalletPropertyCase(usage: number) {
   })
 
   const firstRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   const secondRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
 

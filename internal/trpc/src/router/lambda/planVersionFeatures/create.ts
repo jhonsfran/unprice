@@ -29,6 +29,7 @@ export const create = protectedProjectProcedure
       type,
       unitOfMeasure,
       meterConfig,
+      included,
     } = opts.input
     const project = opts.ctx.project
     const { plans } = opts.ctx.services
@@ -52,6 +53,7 @@ export const create = protectedProjectProcedure
       unitOfMeasure,
       meterConfig,
       hasMeterConfigOverride,
+      included,
     })
 
     if (err) {

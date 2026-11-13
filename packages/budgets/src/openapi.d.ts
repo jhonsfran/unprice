@@ -15,7 +15,7 @@ export interface paths {
     put?: never
     /**
      * create or update a budget
-     * @description Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it.
+     * @description Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it. Keys starting with unprice: are written by Unprice (a customer's subscription budget) and return 403.
      */
     post: operations["budgets.upsert"]
     delete?: never
@@ -289,6 +289,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -447,6 +449,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -605,6 +609,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -763,6 +769,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -921,6 +929,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1079,6 +1089,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1237,6 +1249,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1395,6 +1409,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1553,6 +1569,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1711,6 +1729,8 @@ export interface components {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -1924,6 +1944,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
               }[]
               holds: {
                 defaultTtlMs: number
@@ -1954,6 +1976,8 @@ export interface operations {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -2202,6 +2226,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -2387,6 +2413,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -2547,6 +2575,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -2773,6 +2803,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -2954,6 +2986,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -3057,6 +3091,7 @@ export interface operations {
   "budgets.get": {
     parameters: {
       query: {
+        /** @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit. */
         key: string
       }
       header?: never
@@ -3099,6 +3134,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
               }[]
               holds: {
                 defaultTtlMs: number
@@ -3129,6 +3166,8 @@ export interface operations {
                    * @enum {string}
                    */
                   enforce: "hard" | "soft"
+                  /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                  feature?: string
                   /** @description The limit */
                   amount: string
                   /** @description Used in the current period */
@@ -3398,6 +3437,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -3660,6 +3701,8 @@ export interface operations {
                          * @enum {string}
                          */
                         enforce: "hard" | "soft"
+                        /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                        feature?: string
                         /** @description The limit */
                         amount: string
                         /** @description Used in the current period */
@@ -3707,6 +3750,8 @@ export interface operations {
                  * @enum {string}
                  */
                 enforce: "hard" | "soft"
+                /** @description The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount */
+                feature?: string
                 /** @description The limit */
                 amount: string
                 /** @description Used in the current period */
@@ -3810,6 +3855,7 @@ export interface operations {
   "budgets.models": {
     parameters: {
       query: {
+        /** @description Comma-separated provider/model ids, for example openai/gpt-5 */
         ids: string
       }
       header?: never

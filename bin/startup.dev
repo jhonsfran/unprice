@@ -21,27 +21,25 @@ export NVM_DIR="$HOME/.nvm"
 ALL_SERVICES="nextjs api @unprice/auth-proxy @unprice/docs"
 
 usage() {
-  echo "Usage: $0 [environment] [restart-tinybird] [services]"
+  echo "Usage: $0 [environment] [services]"
   echo ""
   echo "  environment     dev (default) | preview"
-  echo "  restart-tinybird  true | false (default: false, dev only)"
   echo "  services        Comma-separated list; omit or 'all' = all services."
   echo "                  Options: nextjs, frontend, api, auth-proxy, docs"
   echo ""
   echo "Examples:"
   echo "  $0                          # dev, all services"
   echo "  $0 dev                      # dev, all services"
-  echo "  $0 dev false nextjs         # dev, Next.js only"
-  echo "  $0 dev false frontend,api   # dev, Next.js + API"
-  echo "  $0 preview '' nextjs,api    # preview, Next.js + API"
+  echo "  $0 dev nextjs               # dev, Next.js only"
+  echo "  $0 dev frontend,api          # dev, Next.js + API"
+  echo "  $0 preview nextjs,api        # preview, Next.js + API"
   exit 0
 }
 
 # Parse arguments
 [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && usage
 MODE_ID=${1:-dev}
-RESTART_TINYBIRD=${2:-false}
-SERVICES_ARG=${3:-all}
+SERVICES_ARG=${2:-all}
 
 # Normalize service names to turbo package names; comma-separated -> space-separated list.
 # frontend -> nextjs; auth-proxy -> @unprice/auth-proxy; docs -> @unprice/docs
@@ -87,7 +85,7 @@ DEV_FILTER=$(build_dev_filter)
 
 echo "Starting up (env=$MODE_ID, services=${SERVICES_ARG:-all})"
 
-# lets check first that docker, tb cli and node are installed
+# lets check first that docker, jq and node are installed
 if ! command -v docker &> /dev/null; then
   echo "Docker could not be found"
   exit 1
@@ -100,11 +98,6 @@ fi
 
 if ! command -v ol &> /dev/null || ! ol --help > /dev/null 2>&1; then
   echo "OpenLogs CLI (ol) could not be found or is not working"
-  exit 1
-fi
-
-if ! command -v tb &> /dev/null; then
-  echo "Tinybird CLI could not be found"
   exit 1
 fi
 
@@ -141,13 +134,11 @@ if [ "$MODE_ID" = "dev" ]; then
 
   # All URLs target the host so they work from any folder/worktree (e.g. when
   # only frontend runs here but docker-compose was started elsewhere).
-  TB_HOST="http://localhost:7181"
   NODE_ENV="development"
   APP_ENV="development"
   REDIS_URL="http://localhost:8079"
   AUTH_REDIRECT_PROXY_URL="http://localhost:3100/auth"
   REDIS_TOKEN="example_token"
-  TB_RESTARTED=$RESTART_TINYBIRD
   UNPRICE_API_URL="http://localhost:8787"
   UNPRICE_API_KEY="unprice_dev_1234567890"
   MAIN_PROJECT_ID="proj_1234567890"
@@ -156,60 +147,11 @@ if [ "$MODE_ID" = "dev" ]; then
   UPSTASH_REDIS_REST_TOKEN="unprice"
   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/unprice"
 
-  # loging to tb
-  cd internal/analytics
-
-  # check if tinybird is running
-  if [ "$RESTART_TINYBIRD" = "true" ]; then
-    TB_RESTARTED=true
-    # restart tinybird local runtime
-    tb local restart
-  fi
-
-  # check if tinybird http://localhost:7181 is running
-  echo "Waiting for Tinybird to be ready..."
-  max_attempts=12  # 2 minutes total
-  attempt=1
-
-  while ! curl -s http://localhost:7181 > /dev/null 2>&1; do
-    if [ $attempt = 1 -a $TB_RESTARTED = "false" ]; then
-      echo "Starting Tinybird"
-      tb local start -d
-    fi
-
-    if [ $attempt -ge $max_attempts ]; then
-      echo "Tinybird failed to start after 2 minutes"
-      exit 1
-    fi
-    echo "Attempt $attempt of $max_attempts: Tinybird not ready, waiting 10 seconds..."
-    sleep 10
-
-    ((attempt++))
-  done
-
-  # TB_LOCAL_BRANCH=$(git branch --show-current | sed 's/[\/-]/_/g')
-  # echo "Using Tinybird local branch: $TB_LOCAL_BRANCH"
-
-  tb --local build
-  tb --local deploy
-
-  # Local runtime admin token so the app can query the Tinybird Local API.
-  TB_TOKEN="$(
-    TB_VERSION_WARNING=0 tb --local token ls --match "web-apps" \
-      | awk -F'token: ' '/token: / {print $2; exit}'
-  )"
-
-  echo "Using Tinybird token for branch: $TB_LOCAL_BRANCH"
-
-  cd ../../
-
   run_dev_env() {
     infisical run --env=preview --path=/ --recursive -- env \
-      TINYBIRD_TOKEN="$TB_TOKEN" \
       DATABASE_URL="$DATABASE_URL" \
       DATABASE_READ1_URL="$DATABASE_URL" \
       DATABASE_READ2_URL="$DATABASE_URL" \
-      TINYBIRD_URL="$TB_HOST" \
       REDIS_URL="$REDIS_URL" \
       REDIS_TOKEN="$REDIS_TOKEN" \
       AUTH_REDIRECT_PROXY_URL="$AUTH_REDIRECT_PROXY_URL" \
@@ -244,25 +186,13 @@ elif [ "$MODE_ID" = "preview" ]; then
   echo "########################################################"
   echo ""
 
-  TB_HOST=$(infisical secrets get TINYBIRD_URL --env=preview --path=/app --raw-value)
-  # get the admin token from infisical
-  TB_ADMIN_TOKEN=$(infisical secrets get TB_ADMIN_TOKEN --env=preview --path=/ci --raw-value)
   NODE_ENV="production"
   APP_ENV="preview"
 
-  # curl -X GET -H "Authorization: Bearer $TB_TOKEN" "http://localhost:7181/v0/pipes"
-  cd internal/analytics
-
-  # auth tb with the admin token
-  tb --cloud login --token $TB_ADMIN_TOKEN --host $TB_HOST
-
-  cd ../../
-
-  # override the token in the env
   if [ -z "$DEV_FILTER" ]; then
-    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" DATABASE_URL="$DATABASE_URL" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
+    infisical run --env=preview --path=/ --recursive -- env DATABASE_URL="$DATABASE_URL" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" pnpm run dev
   else
-    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" DATABASE_URL="$DATABASE_URL" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm turbo run dev --parallel $DEV_FILTER
+    infisical run --env=preview --path=/ --recursive -- env DATABASE_URL="$DATABASE_URL" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" pnpm turbo run dev --parallel $DEV_FILTER
   fi
 else
   echo "Invalid mode: $MODE_ID"

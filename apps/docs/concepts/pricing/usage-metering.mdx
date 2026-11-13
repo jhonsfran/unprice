@@ -16,20 +16,25 @@ usage meter.
 | Feature | Names the capability you sell or limit | `ai-output-tokens` |
 
 Use `eventSlug` for the action and `properties` for its measured values. Use `featureSlug` when
-checking or consuming one specific feature.
+checking one specific feature.
 
-One asynchronous event can update several matching feature meters:
+One recorded event can update several matching feature meters:
 
 ```ts
 const { error } = await unprice.usage.record({
-  customerId: "cus_1234567890",
-  eventSlug: "completions",
-  idempotencyKey: request.id,
-  properties: {
-    aiMessages: 1,
-    inputTokens: 1840,
-    outputTokens: 620
-  }
+  events: [
+    {
+      customerId: "cus_1234567890",
+      eventSlug: "completions",
+      idempotencyKey: request.id,
+      occurredAt: Date.now(),
+      properties: {
+        aiMessages: 1,
+        inputTokens: 1840,
+        outputTokens: 620
+      }
+    }
+  ]
 });
 
 if (error) throw new Error(error.message);
@@ -44,10 +49,8 @@ Configure each usage feature with its event slug, aggregation method, and aggreg
 | --- | --- | --- |
 | `sum` | Sum of the reported numeric field | Tokens, bytes, or seconds |
 | `count` | Number of matching events | API calls, jobs, or exports |
-| `max` | Highest reported value | Peak storage or peak active users |
-| `last` | Latest reported value | An absolute resource snapshot |
 
-`sum`, `max`, and `last` need an `aggregationField`. `count` counts events rather than reading a
+`sum` needs an `aggregationField`. `count` counts events rather than reading a
 numeric field. Retries of the same event must use the same `idempotencyKey`.
 
 ## Quota resets and billing periods
@@ -56,49 +59,34 @@ A quota window controls when a customer's usage allowance resets. A billing peri
 charges are invoiced. These can differ, for example a daily allowance on a monthly subscription.
 
 Configure the feature's reset cadence separately from its billing cadence. Do not assume that an
-invoice date also resets every usage limit.
+invoice date also resets every usage limit. Finite usage allowances support daily, weekly,
+monthly, or one-time resets. Annual or multi-interval billing needs an explicit supported reset
+cadence for a finite allowance.
 
 Use `access.check` to inspect current `usage`, `limit`, and `quotaWindow`. The window contains
 `startAt`, `endAt`, and `periodKey`; timestamps use epoch milliseconds. A null `endAt` means the
-window has no end. A null `quotaWindow` means active grants do not share a single reset window.
+window has no end. A null `quotaWindow` means the feature has no quantity limit.
 
 Use [usage analytics](/libraries/ts/sdk/usage/get) for historical reporting, not as a live spend gate.
 
 ## Report usage or authorize work
 
-- Use `usage.record` after an action when you need asynchronous metering and evidence. It does not
+- Use `usage.record` after an action to count usage and record evidence. It does not
   prevent over-budget work.
-- Use `usage.consume` before an action when its usage amount is already known. Check `allowed`
-  before starting the work.
-- Use a budgeted run when the final amount is unknown before work starts. Reserve first, then
-  [settle actual usage](/libraries/ts/sdk/runs/settle) when the workload finishes.
+- Use `usage.consume` before an action when its usage amount is already known. Start the work
+  only when the call succeeds; a denial returns `BUDGET_EXCEEDED`.
+- Use a budget hold when the final amount is unknown before work starts. Hold first, then
+  [settle actual usage](/budgets/spend) when the work finishes.
 
 A read-only `access.check` does not consume an allowance or reserve money. Two concurrent requests
 can both pass a read-only check. Use an enforcing operation for spend control.
 
-## Report resource snapshots
+## Resource counts
 
-For resources such as active seats or stored bytes, report the absolute value from your own
-system. Configure `max` to track the highest reported value or `last` to track the latest one.
-
-```ts
-const { error } = await unprice.usage.record({
-  customerId,
-  eventSlug: "active_seats_snapshot",
-  idempotencyKey: `active-seats:${customerId}:${snapshotId}`,
-  timestamp: snapshotTimestamp,
-  properties: { activeSeats }
-});
-
-if (error) throw new Error(error.message);
-```
-
-Capture the value and timestamp together. Persist the event and its idempotency key until delivery
-succeeds. Reuse them on retry; use a new key for a new snapshot.
-
-A periodic snapshot can miss a peak between samples. Choose a reporting interval that fits the
-billing rule, or send a snapshot when the resource count changes. Enforce immediate resource-count
-limits in your application transaction; a delayed snapshot cannot prevent concurrent writes.
+`sum` and `count` measure accumulated usage. For an absolute resource count, such as active seats
+or stored bytes, keep the current count in your application. Enforce its limit in the transaction
+that creates or removes the resource. Repeated absolute snapshots would add the same resources
+more than once.
 
 ## One-time allowances
 

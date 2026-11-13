@@ -6,12 +6,14 @@ import {
   recordBudgetInputSchema,
   recordBudgetResponseSchema,
 } from "@unprice/db/validators"
+import { amountUsage } from "@unprice/services/budgets"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { runBudgetVerb, toWire } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { consumedToWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -41,7 +43,11 @@ export const route = createRoute(
 
 export const registerRecordBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { key, ...request } = c.req.valid("json")
-    const { type: _, ...recorded } = await runBudgetVerb(c, key, { type: "record", ...request })
-    return c.json(toWire(recorded), HttpStatusCodes.OK)
+    const { key, amount, ...request } = c.req.valid("json")
+    const {
+      type: _,
+      created: __,
+      ...recorded
+    } = await runBudgetVerb(c, key, { type: "record", ...request, usage: amountUsage(amount) })
+    return c.json(consumedToWire(recorded), HttpStatusCodes.OK)
   })

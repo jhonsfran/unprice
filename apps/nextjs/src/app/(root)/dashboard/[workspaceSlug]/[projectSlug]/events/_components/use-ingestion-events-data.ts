@@ -1,6 +1,6 @@
 "use client"
 
-import { useInfiniteQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 import { useCallback, useMemo, useState } from "react"
 import type { IngestionQueryFilter } from "~/components/analytics/ingestion-health-model"
@@ -8,20 +8,16 @@ import { ANALYTICS_REFRESH_INTERVAL_MS } from "~/components/analytics/ingestion-
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import type { DataTableFilterParams } from "~/lib/searchParams"
 import { useTRPC } from "~/trpc/client"
+import { flattenUniqueEvents, ingestionEventKey } from "./ingestion-event-rows"
 import {
   type IngestionEventRow,
   type IngestionEventsFilterId,
   type IngestionEventsFilterValues,
-  type IngestionStatus,
   buildIngestionEventsFilters,
 } from "./ingestion-events-table-schema"
-import { useReplayQueue } from "./use-replay-queue"
 import { useRollingWindow } from "./use-rolling-window"
 
-export { MAX_REPLAY_IDS } from "./use-replay-queue"
-
 const EVENTS_PAGE_SIZE = 50
-const INGESTION_STATES = ["processed", "rejected", "failed"] as const
 
 export function useIngestionEventsData() {
   const trpc = useTRPC()
@@ -31,7 +27,6 @@ export function useIngestionEventsData() {
   }>()
   const [filters, setFilters] = useFilterDataTable()
   const [detailsEvent, setDetailsEvent] = useState<IngestionEventRow | null>(null)
-  const replayStorageKey = `unprice:events:replay-queued:${workspaceSlug}:${projectSlug}`
   const { queryWindow, hasExplicitDateRange, windowLabel } = useRollingWindow(
     filters.from,
     filters.to
@@ -46,8 +41,27 @@ export function useIngestionEventsData() {
   )
 
   const {
+    data: status,
+    isLoading: isSummaryLoading,
+    isFetching: isSummaryFetching,
+    error: summaryError,
+  } = useQuery(
+    trpc.analytics.getIngestionSummary.queryOptions(
+      {
+        window: queryWindow,
+        filter: ingestionQueryFilter,
+        limit: EVENTS_PAGE_SIZE,
+      },
+      {
+        placeholderData: (previousData) => previousData,
+        refetchInterval: hasExplicitDateRange ? ANALYTICS_REFRESH_INTERVAL_MS : false,
+        refetchOnWindowFocus: true,
+      }
+    )
+  )
+
+  const {
     data: queryData,
-    refetch,
     isLoading,
     isFetching,
     error: queryError,
@@ -55,11 +69,9 @@ export function useIngestionEventsData() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery(
-    trpc.analytics.getIngestionStatus.infiniteQueryOptions(
+    trpc.analytics.listIngestionEvents.infiniteQueryOptions(
       {
-        window: queryWindow,
-        filter: ingestionQueryFilter,
-        includeFacets: true,
+        scope: { window: queryWindow, filter: ingestionQueryFilter },
         limit: EVENTS_PAGE_SIZE,
       },
       {
@@ -72,29 +84,17 @@ export function useIngestionEventsData() {
     )
   )
 
-  const { queuedReplayIds, pendingReplayIds, blockedReplayIds, handleReplay, replayIsPending } =
-    useReplayQueue(replayStorageKey, refetch)
-
   const pages = queryData?.pages
   const rows = useMemo(() => flattenUniqueEvents(pages ?? []), [pages])
-  const hasReplayableRows = useMemo(
-    () =>
-      rows.some(
-        (row) =>
-          row.state === "failed" && row.replayable && !blockedReplayIds.has(row.canonicalAuditId)
-      ),
-    [blockedReplayIds, rows]
-  )
   const visibleDetailsEvent = useMemo(() => {
     if (!detailsEvent) {
       return null
     }
 
     return (
-      rows.find((row) => row.canonicalAuditId === detailsEvent.canonicalAuditId) ?? detailsEvent
+      rows.find((row) => ingestionEventKey(row) === ingestionEventKey(detailsEvent)) ?? detailsEvent
     )
   }, [detailsEvent, rows])
-  const firstPage = pages?.[0]
   const handleLoadMore = useCallback(() => {
     if (!hasNextPage || isFetchingNextPage) {
       return Promise.resolve()
@@ -148,38 +148,32 @@ export function useIngestionEventsData() {
   const filterOptions = useMemo(
     () =>
       buildIngestionEventsFilters({
-        facets: firstPage?.facets,
+        facets: status?.facets,
         values: filterValues,
         onChange: handleFilterChange,
       }),
-    [filterValues, firstPage?.facets, handleFilterChange]
+    [filterValues, status?.facets, handleFilterChange]
   )
 
-  const isInitialLoading = isLoading && rows.length === 0
-  const isRefreshing = isFetching && !isInitialLoading && !isFetchingNextPage
+  const isInitialLoading = (isLoading || isSummaryLoading) && rows.length === 0
+  const isRefreshing = (isFetching || isSummaryFetching) && !isInitialLoading && !isFetchingNextPage
 
   return {
     workspaceSlug,
     projectSlug,
     isRefreshing,
-    status: firstPage,
+    status,
     windowLabel,
     rows,
     filterOptions,
     handleRejectionFilterSelect,
     searchValue: filters.search ?? "",
     setFilters,
-    queryError,
+    queryError: queryError ?? summaryError,
     isInitialLoading,
     isFetchingNextPage,
     hasNextPage,
     handleLoadMore,
-    handleReplay,
-    replayIsPending,
-    blockedReplayIds,
-    hasReplayableRows,
-    queuedReplayIds,
-    pendingReplayIds,
     visibleDetailsEvent,
     detailsEvent,
     setDetailsEvent,
@@ -263,27 +257,5 @@ function updateFilterValues(
 function isIngestionState(
   value: string
 ): value is NonNullable<IngestionQueryFilter["states"]>[number] {
-  return INGESTION_STATES.includes(value as (typeof INGESTION_STATES)[number])
-}
-
-export function isReplayQueued(row: IngestionEventRow, replayIds: ReadonlySet<string>): boolean {
-  return row.state === "failed" && row.replayable && replayIds.has(row.canonicalAuditId)
-}
-
-function flattenUniqueEvents(pages: IngestionStatus[]): IngestionEventRow[] {
-  const seen = new Set<string>()
-  const events: IngestionEventRow[] = []
-
-  for (const page of pages) {
-    for (const event of page.recentEvents) {
-      if (seen.has(event.canonicalAuditId)) {
-        continue
-      }
-
-      seen.add(event.canonicalAuditId)
-      events.push(event)
-    }
-  }
-
-  return events
+  return value === "processed" || value === "rejected"
 }

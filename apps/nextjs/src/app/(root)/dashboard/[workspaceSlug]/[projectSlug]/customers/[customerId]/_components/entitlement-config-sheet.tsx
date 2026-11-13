@@ -115,10 +115,10 @@ export function EntitlementConfigSheet({
                     </Alert>
                   )}
                   <FeatureConfigForm
+                    key={planVersionFeature.id ?? planVersionFeature.featureId}
                     className="pb-6"
                     defaultValues={planVersionFeature}
                     planVersion={activePlanVersion}
-                    planFeatures={planVersion.planFeatures}
                     setDialogOpen={setIsOpen}
                   />
                 </div>

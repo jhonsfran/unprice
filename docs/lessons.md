@@ -34,6 +34,50 @@ patterns. Keep it cheap to load and useful.
   when `mint validate` passes; restart `apps/docs` dev preview from the docs root before treating it
   as a config bug.
 
+## Rate Cards And Plan Pricing
+
+- 2026-11-13: When editing feature price tiers, use { upTo, rate, flat }. Inclusive firstUnit and lastUnit belong only at the monetization and plan-template document boundary.
+- 2026-11-13: When previewing catalog pricing, write nothing. Merge bundled, stored, and custom costs in memory and use an unsaved card when needed; apply creates and assigns the card in its transaction. The reviewed hash binds policy and rows, never the new card id.
+
+- 2026-11-07: A journal operation id is unique within its budget. Dashboard row keys and recent-event cursors must include `budget_key`; page by `(timestamp, operation_id, budget_key)` to keep tied events from different payers.
+
+- 2026-11-06: Rate-card version writes lock the plan, then the version, then its cards. Publication also updates the previous latest version; a version-first lock can deadlock with a shared-card copy.
+- 2026-11-13: When writing card rows, do not invalidate plan-version caches. Live changes wait at least RATE_CHANGE_NOTICE_MS and cached versions refresh within CARD_REFRESH_MS; internal/db/src/validators/rate-cards.test.ts pins CARD_REFRESH_MS < RATE_CHANGE_NOTICE_MS.
+- 2026-11-06: Inline table cells read saved props while idle. Capture the saved value at focus and skip blur commits if it changed during the edit.
+- 2026-11-13: When using createRateCardsFake, seed assigned versions' feature snapshots. The fake runs production planPublish and planClose planners and reads snapshots through featurePricingOf; do not weaken the fake for incomplete fixtures.
+- 2026-11-05: A feature's meter exists twice: `features.meter_config` is the project template and
+  `plan_versions_features.meter_config` is the snapshot the plan editor writes and the budget reads.
+  Validate a card's rows against the plan features of the versions assigned to it
+  (`planFeaturePricing`), never against the project template once the card is assigned, or a
+  `model` row is refused with `UNKNOWN_DIMENSION` while the editor says the meter has it.
+- 2026-11-05: The 10-minute rate notice is a liveness rule: it applies once a version with
+  `published_at` prices with the card, not once the card has rows. Decide it under the card lock,
+  and never let a dialog pre-fill "now" as a start time: send no time and let the server pick the
+  earliest allowed, or the minute truncation rejects a card's first row.
+- 2026-11-05: A plan version's status moves only through publish; `planVersions.update` must not
+  accept `status`, or a published version set back to draft makes its live card look unused.
+- 2026-11-05: A number typed into a text input reaches the form schema as a string; a form
+  schema that extends a boundary schema with a number field must use `z.coerce.number()`
+  (`plan-form.tsx` trial), or the dialog shows "expected number, received string" and never submits.
+- 2026-11-05: Features are project-wide: a second plan reuses them from the library, and a
+  feature dialog with an existing slug refuses (by design). A browser walk that creates features
+  must start from a project that lacks them.
+- 2026-11-05: A jotai list setter must return a new array; `features[index] = x; return
+  features` keeps the same reference and subscribers (the feature table) do not re-render.
+- 2026-11-05: In a cmdk palette whose items load async, mount the "Create" item only once the
+  matches are in; while it is the only item cmdk keeps it selected after the matches arrive, and
+  Enter creates instead of picking the first match.
+- 2026-11-05: `pnpm --filter @unprice/services test:integration -- <file>` ignores the file and
+  runs the whole suite; run one file with
+  `NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test pnpm exec vitest run --config vitest.integration.config.ts <file>`
+  from `internal/services`. A live-card test must attach the feature to the published version,
+  because the card is validated against its assigned versions' plan features.
+
+- 2026-11-05: The pre-commit hook runs `pnpm validate` plus every test suite in parallel, so a
+  fast-check property test that takes 5 s alone takes 20 s there. Give such a test its own
+  timeout (`budget.statements.properties.test.ts` has `PROPERTY_TIMEOUT_MS`) instead of raising
+  the global one, and rerun a suite alone before suspecting a regression.
+
 ## CI And GitHub Actions
 
 - 2026-11-03: When a billing PR predates the dependency migration on main, merge main before updating audit pins; preserve its Zod 4 compatibility patches and lockfile.
@@ -77,12 +121,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
-- 2026-11-03: Tinybird meter-fact fixtures must use the existing 2099 timeline; past event timestamps can be removed by the 90-day TTL during test ingestion. Keep fixture dates and endpoint test windows aligned.
+- 2026-11-13: When a closed budget reaches retention age, keep storage while hasUnfinishedStatements finds an open or sealed statement. Billing must still seal and invoice it.
+- 2026-11-13: When pricing usage, route it to registered statements. There is no perpetual statement mode; missing coverage returns NO_STATEMENT.
+- 2026-11-13: When mapping budget refusals to HTTP, use apps/api/src/errors/budget.ts through toUnpriceApiError. Internal payer routes return state conflicts as 409 instead of masked 500 responses.
+- 2026-11-13: When reading the budget journal, pass JournalQuery<T> (SQL, row schema, context) to services.budgetJournal. Journal tests run the QUALIFY dedupe in SQLite with its predicate moved to an outer SELECT.
 
-- 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
-  in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
-  the route test harnesses (`budgets.test.ts`, `local-mode.fuzz.test.ts`) that set `services` by hand.
-  Exception: `budgetOperator` calls the API itself, so the API's bag leaves it out.
+- 2026-11-13: When exposing a new shared service to API routes, update apps/api/src/hono/env.ts and apps/api/src/middleware/init.ts. Adding it to createServiceContext alone does not expose it. Update route test harnesses that set services by hand; budgetOperator stays outside the API bag because it calls the API itself.
 - 2026-10-19: A gateway to an internal route reads "not found" only from the API's JSON error body
   (`error.code === "NOT_FOUND"`); Hono's default 404 for a missing route is plain text, and
   read-repair that trusted a bare 404 would forget catalog rows during a split deploy.
@@ -110,9 +154,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-09-02: Pricing automation needs separate credentials: configuration keys own
   `monetization.get`/`monetization.apply`, while runtime keys own signup, usage, and ingestion
   status operations.
-- 2026-08-28: Customer “Active entitlements” reads current metered state from
-  `EntitlementWindowDO`; keep Tinybird for historical dashboard evidence. An empty usage-dashboard
-  cache loader must return `undefined` because removing the key can race the cache's deferred set.
 - 2026-08-25: Entitlement reset buckets must pass the raw cadence start and configured reset
   anchor to `calculateCycleWindow`; cover monthly `dayOfCreation` behavior with a non-midnight
   timestamp or usage can reset at UTC midnight before subscription renewal. In reset tests, match
@@ -120,21 +161,7 @@ patterns. Keep it cheap to load and useful.
 - 2026-08-24: SDK reservation facades may release only on a known non-billable path; when provider
   usage can already exist, keep settlement retryable and never turn a settlement error into a
   release.
-- 2026-08-24: `runs.settle` owns post-provider accounting: bypass feature-limit enforcement, keep
-  the reserved money envelope enforced, and close through the serialized RunBudgetDO mutation.
-- 2026-08-24: Resolve run reservation expiration once before persistence; keep the same timestamp
-  in Postgres, RunBudgetDO state, its alarm, and the wallet reservation period.
 - 2026-08-01: When replacing a synchronous runtime usage or run route, preserve the cached bouncer at the work-authorizing boundary; `access.check` and async `usage.record` are not enforcement gates.
-- 2026-07-08: `EntitlementWindowDO` is a thin Cloudflare adapter; entitlement window business logic
-  lives in `apps/api/src/ingestion/entitlements/processor.ts` behind the backend-neutral ports in
-  `ports.ts` (state store + `atomically` boundary, scheduler, runtime, wallet provider, clock).
-  Put new entitlement behavior in the processor, keep SQLite specifics in
-  `entitlement-window-store.ts`, and check `processor.test.ts` for the in-memory store contract a
-  future Redis backend must satisfy; do not reintroduce storage or wallet calls into the DO class
-  or a hand-rolled Drizzle/SQLite interpreter into behavioral tests.
-- 2026-07-11: When splitting `EntitlementWindowProcessor` lifecycle collaborators, keep operation
-  instrumentation at the processor boundary and pass close/flush callbacks into collaborators so
-  nested `alarm`, `close_reservation`, and `flush_refill` telemetry remains unchanged.
 - 2026-07-11: Keep entitlement pricing helpers store-free: pass readonly meter/grant snapshots,
   return next/touched grant states, and let processor transactions own all state reads and writes.
 - 2026-07-11: Meter transition semantics belong in `@unprice/services/entitlements`; engine writes
@@ -142,50 +169,25 @@ patterns. Keep it cheap to load and useful.
   stays caller-selected: single-event wallet bootstrap defers it to apply, batch/sync uses ambient
   `Date.now()`, and async uses its injected clock.
 
-- 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
-  `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing
-  DOs can type-check but fail at runtime on missing columns. Never create migrations manually, always use pnpm run db:check:ingestion:migrations for the api.
-- 2026-06-06: `bin/startup.dev` builds/deploys analytics with `tb --local`; use
-  `TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token"` for the app token,
-  because `tb --local token copy "workspace admin token"` can return a static token rejected by
-  Tinybird Local API requests.
 - 2026-06-06: Local dev startup must override `DATABASE_READ1_URL` and `DATABASE_READ2_URL`
   alongside `DATABASE_URL`; `apps/api/dev.sh` regenerates `.dev.vars` from non-empty parent env
   values and otherwise preserves stale preview read-replica secrets.
 - 2026-05-09: Removing a Durable Object class needs `deleted_classes` in the affected
   `apps/api/wrangler.jsonc env.*` migration.
+- 2026-11-04: After a wrangler binding change, edit `apps/api/worker-configuration.d.ts` by hand
+  unless a filled `.dev.vars` exists; `wrangler types` without one drops every secret's type.
+- 2026-11-04: The onboarding paid-action proof charges a standalone budget per attempt
+  (`onboarding:<customer>:<feature>:<attempt ms>`, closes after 1 hour), never the payer budget.
 - 2026-05-08: `entitlement/verify` stays compact: decision fields only, no internal
   entitlement metadata.
 - 2026-05-17: `entitlement/verify` is read-only for wallet reservations; use apply/alarm paths
   for reservation close and release.
-- 2026-05-08: `/v1/usage/get` returns raw usage/spend from Tinybird; Hono formats display money.
-- 2026-05-08: Keep Tinybird response parsers tolerant during endpoint rollouts; old cloud
-  shapes can lag local code.
-- 2026-05-31: Tinybird `AggregateFunction` state migrations that change `argMax` version type
-  cannot direct-`CAST` old states; `FORWARD_QUERY` must `finalizeAggregation` the old value and
-  `initializeAggregation('argMaxState', value, new_version)` for the new state.
-- 2026-06-23: Tinybird deploy can reject rollup backfills when a modified raw datasource has a
-  shorter TTL than existing materialized targets; preserve history with `FORWARD_QUERY` on the
-  rollup datasources instead of shortening their TTLs.
-- 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
-  update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
-  `tb test run` so existing endpoint expectations still pass.
-- 2026-08-02: When a raw datasource migration backfills unchanged materialized descendants,
-  their temporary `FORWARD_QUERY` must be `SELECT *`; replace stale type-migration projections
-  and remove all temporary forward queries after promotion.
-- 2026-08-07: Tinybird Cloud rejects stale `FORWARD_QUERY` projections even when local
-  `tb build` passes; remove them after promotion so nullable-column additions use `ALTER` and
-  unchanged rollups are not backfilled.
-- 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
-  `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
   and `amount_after` for cumulative spend.
 - 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a
   duplicate from audit `exists`.
 - 2026-05-08: API wallet-empty messages should use configured meter/event slugs, not derived
   storage keys.
-- 2026-05-09: `/v1/events/ingest/sync` must await durable reporting enqueue; `waitUntil`
-  alone is not durable enough for ingestion evidence.
 - 2026-05-09: Audit payload drift is asynchronous evidence, not a sync-ingest `409`; group
   `canonicalAuditId` and count distinct `payloadHash` values in the audit lake.
 - 2026-05-09: Keep sync ingest on the low-latency auth path with `Server-Timing`; do not add the
@@ -197,9 +199,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-13: When logging caught failures with `Logger.error`, pass the caught `Error` as the
   first argument and put the operation name in fields; string-first error logs make evlog create a
   wrapper error whose stack hides the real cause.
-- 2026-06-13: Ingestion status fields are end-to-end contracts; when adding a customer-visible
-  field, update the reporting envelope, Tinybird datasource/endpoints/fixtures, analytics
-  validators, service use cases, API tests, and dashboard row/detail types together.
 - 2026-05-17: Axiom-bound logs should normalize known camelCase aliases in
   `@unprice/observability`; keep business fields snake_case to avoid duplicate columns.
 - 2026-05-18: Keep `request.*` and `business.*` as the canonical Axiom shape; evlog may use
@@ -216,12 +215,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-09-19: Deployed Cloudflare Worker timers only advance after I/O; `Date.now()` and
   `performance.now()` can both report `0` for synchronous Durable Object CPU/SQLite work. Use
   caller-side RPC timing, native CPU/wall traces, and separate timers around awaited wallet calls.
-- 2026-09-19: `EntitlementWindowDO` awaits `ready` before `runDoOperation`, so operation duration
-  excludes migration/initialization cold-start time; measure readiness separately and keep the DO
-  id distinct from a per-invocation request id.
-- 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
-  first-class drain event; constructor-scoped DO logger entries can be absent from top-level
-  Axiom rows, leaving only the outer `runDoOperation` wrapper fields.
 - 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
   instead of emitting a second event; only standalone/RSC tRPC contexts should emit
   their own batched procedure event.
@@ -231,28 +224,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-25: Public API route allowlists must run before `init()` so scanner 404s do not
   construct cache, DB, service, or log-drain context.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
-- 2026-05-11: For usage concurrency, test `EntitlementWindowDO` replay and reporting enqueue
-  retry paths, not only the service adapter.
 - 2026-07-04: API Durable Object tests are integration-style under root Turbo concurrency; keep
   `apps/api/vitest.config.ts` on a 15s `testTimeout` instead of relying on Vitest's 5s default.
-- 2026-07-05: RunBudgetDO tests should cache the mocked DO module import in `beforeAll`; per-spec
-  `vi.resetModules()` makes Vite transform/import startup count against individual test timeouts
-  and can flake under Turbo contention.
-- 2026-07-10: Parse EntitlementWindow meter facts once at the RunBudget pricing-port boundary;
-  require each fact's non-empty entitlement ID to match the request, derive invoice context from
-  the typed fact timestamp, and take spend-bucket currency from the run.
-- 2026-07-11: Keep RunBudget state-machine and bucket behavior in `processor.ts`, all Durable
-  SQLite access in `run-budget-store.ts`, and construct the injected wallet service graph once per
-  external operation so Neon request-scoped resources never cross Worker requests.
 - 2026-07-11: Durable SQLite atomic store callbacks must execute synchronous Drizzle `.run()`
   statements inside `db.transaction`; async callbacks can leave earlier writes committed when a
   later statement fails.
-- 2026-07-11: RunBudget wallet captures must atomically persist a run-monotonic sequence and an
-  immutable `[range_start_amount, target_amount)` before wallet I/O; abandoned targets advance the
-  logical range cursor but only successful captures advance `flushed_amount`.
-- 2026-07-11: RunBudget alarms must flush captureable bucket spend even before an intent exists;
-  persist quantity ranges on the intent too, and seal nullable legacy quantity snapshots before
-  retries or cumulative bucket updates so wallet payload hashes cannot drift.
 - 2026-10-16: The budget primitive (ADR-0006) keeps its state machine pure in
   `@unprice/services/budgets` (`transition`); a DO persists the returned ledger, rows, and periods
   in one transaction. When adding a verb, extend the reference model in `budget.properties.test.ts`
@@ -262,9 +238,11 @@ patterns. Keep it cheap to load and useful.
   it always counts, even past a hard limit: refusing it loses the count, not the spend.
 - 2026-10-17: Keep unresolved BudgetDO holds reserved across timeouts and window resets. Only
   final settlement or explicit zero-usage release can return capacity; see ADR-0006 B2-B3.
-- 2026-10-17: No BudgetDO data has shipped (see 136ab303a). Change its stored format without
-  read-compat, startup repair, or legacy states; keep its migrations append-only and wipe local
-  `.wrangler` budget state after a format change.
+- 2026-11-04 (replaces 2026-10-17): BudgetDO data has shipped since 10-18: preview benchmark
+  budgets and prod test budgets. A stored-format change ships a custom migration
+  (`bin/migrate.dev budget --custom`) that clears the rows the new code cannot read, never an
+  in-place reinterpretation; still no read-compat or legacy states. See
+  `0007_reset_rows_before_usage_vectors.sql`.
 - 2026-10-17: The installed Drizzle SQLite generator splits commas in index expressions. For
   budget key lookup, use `data_json ->> '$.idempotencyKey'`, generate through
   `bin/migrate.dev budget`, and verify index selection with `EXPLAIN QUERY PLAN` in workerd.
@@ -327,6 +305,11 @@ patterns. Keep it cheap to load and useful.
   weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
 - 2026-10-18: `pnpm add` can re-resolve unrelated peer variants in `pnpm-lock.yaml`; add only the
   importer entries and confirm with `corepack pnpm install --frozen-lockfile`.
+- 2026-11-03: `@unprice/services/pricing` prices usage as `round(f(after)) - round(f(before))` on
+  the cumulative position. Rounding the exact per-event delta instead fails every split-invariance
+  property in `pricing.properties.test.ts`; never "simplify" `delta` in `rate.ts`.
+- 2026-11-03: Rate card decimals parse into `Amount` in `internal/db/src/validators/rate-cards.ts`; write
+  pricing fixtures in wire form and parse them through the schemas (`pricing/fixtures.ts`).
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at
@@ -344,9 +327,42 @@ patterns. Keep it cheap to load and useful.
   `sweep` always writes `lastAt = now` first, and the alarm purges at that clock.
 - 2026-10-16: An error escaping a DO method (RPC or `runInDurableObject` instance call) shows up as
   an unhandled rejection in vitest-pool-workers; test rollback paths through the processor.
-- 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
-  `WalletService.lockCustomer`; separate run DOs share customer funds, while `parentRunId` alone
-  does not enforce a recursive parent budget.
+- 2026-11-03: Budget usage is a vector (`Usage` in `budgets/usage.ts`: the amount plus quantities per
+  feature); a limit reads one measure. The public wire still carries amounts: route adapters convert
+  with `amountUsage` and project back with the `*ToWire` helpers in `routes/budgets/budget-verb.ts`.
+- 2026-11-04: Workers RPC types a tuple (`readonly [string, string]`) in a BudgetDO reply as
+  `string[]`, so the stub's reply stops matching `BudgetRejection` while `pnpm typecheck` stays
+  green. Use arrays, never tuples, in replies.
+- 2026-11-04: A hold's estimate is the most its event can cost from any position. A property that
+  an actual within the estimate never prices above it passed with the bound's jump points removed
+  until a scenario had a flat into a cheaper tier; give bound properties a curve where the worst
+  stretch straddles a boundary.
+- 2026-11-04: A field typed `unknown` anywhere in a BudgetDO reply (an operation row inside
+  `BudgetInspection`) is not RPC-serializable, so the stub's reply type stops narrowing on `ok`
+  (`client.ts` loses `reply.inspection`). Type stored event properties as flat JSON scalars.
+- 2026-11-04: A routing mutation in `budget.statements.properties.test.ts` survived 200 runs while
+  most scenarios never reached January. `clocksOf` now scales each scenario's advances to end on
+  `LAST_CLOCK`, so every run seals November and December; keep that when changing the generator.
+- 2026-11-04: Budget funding (ADR-0008 D10) follows the CARDS_STALE shape: the core refuses with
+  FUNDING_REQUIRED and writes nothing; only `fund` and a seal persist wallet intents. Never call the
+  wallet before an intent row exists, and never recompute a pending intent: `fund` answers it as stored.
+- 2026-11-13: When refreshing BudgetDO cards, pass them to execute(request, cards). The refresh shares the command's transaction; CARDS_STALE after refresh rolls it back. There is no cacheCards RPC or cards-only storage.
+- 2026-11-13: When a withSubscriptionMachine wrapper owns the commit (no db, no dryRun, lock not false), it syncs the payer budget after lock release. Both wrappers include zero-cycle runs and payment or invoice renewals. Callers with their own transaction sync once after commit; jobs pass caller: "job".
+- 2026-11-04: A trial period registers its statement with `free: true` (compile reads the billing
+  period's `type`); a prepaid close never captures a free statement, and `resolvePeriodCharge` throws
+  when a capped phase's non-trial usage is not captured in full. Recurring proration ends a phase's last
+  period at `phase.endAt + 1`, since `calculateProration` reads a half-open window.
+- 2026-11-04: Request paths never invoice: an immediate cancel only caps periods and syncs; the
+  invoicing job bills canceled and expired subscriptions through `billing.invoiceEndedSubscription`.
+  Payer statement completion in `billPeriod` is best effort and runs only when a group is metered.
+- 2026-11-04: Phases and their last billing period end inclusively (the next starts 1 ms later);
+  statements are half-open, so compile ends a phase's last statement at `phase.endAt + 1`. Shortening an
+  open statement stops at `lastEventAt + 1`, and the next registration of the feature starts there.
+  A `dayOfCreation` reset on the billing interval compiles from the phase's numeric `billingAnchor`.
+- 2026-11-03: `apps/api` tsconfig excludes tests, so a core type change breaks DO and route tests only
+  at runtime. Typecheck them with a scratch tsconfig that extends `./tsconfig.json`, includes
+  `src/ingestion/budget` and `src/routes/budgets`, and adds `@cloudflare/vitest-pool-workers` types;
+  the baseline has errors, so diff per-file error counts against the same run on HEAD.
 - 2026-10-15: When reviewing run expiry, distinguish retryable captures from abandoned captures;
   `closeRunInStorage` can release funds after abandonment and mark reconciliation needed.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
@@ -359,27 +375,9 @@ patterns. Keep it cheap to load and useful.
   verification without signup/payment flows.
 - 2026-09-19: Production k6 latency and baseline phases must use separate customers; customer-scoped
   ingestion totals can otherwise let latency traffic hide missing baseline events.
-- 2026-09-19: Entitlement reservation lifecycle methods return domain outcomes only; measure
-  bootstrap duration in `EntitlementWindowProcessor`, which owns apply telemetry.
 - 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
   entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
   payload-compatible meters stay processed together.
-- 2026-05-17: Async ingestion should batch entitlement-window RPCs by customer entitlement in
-  chunks of 100; DO alarm cleanup should use indexed bounded probes/deletes, not `count(*)` scans
-  over outbox, audit, or idempotency tables.
-- 2026-05-17: EntitlementWindowDO apply/verify hot paths should read only active
-  `grant_windows` bucket keys; full-table grant-window scans multiply storage rows read under
-  load.
-- 2026-05-30: EntitlementWindowDO no longer uses a local fact outbox; post-apply commits must
-  still schedule lifecycle alarms so wallet final flush, idempotency cleanup, and retention wakeups
-  continue.
-- 2026-05-31: Ingestion hot paths enqueue append-only reporting envelopes after
-  `EntitlementWindowDO` apply; do not reintroduce `IngestionAuditDO.exists` or
-  `IngestionAuditDO.commit` into sync or async request handling.
-- 2026-05-31: `IngestionAuditDO` is retired; keep only the `deleted_classes` migration marker
-  in `apps/api/wrangler.jsonc`, and use reporting envelopes for audit/Pipeline/Tinybird delivery.
-- 2026-06-05: Customer-visible ingestion analytics should project from reporting envelopes in
-  the reporting consumer; avoid parallel service-level status writes that can split evidence.
 - 2026-06-05: Lakehouse registry fields with `required: false` and `defaultValue: null` should
   parse explicit `null`, because reporting payloads send nullable optional columns.
 - 2026-07-01: R2 Pipeline audit records are parsed through the lakehouse registry before send; when
@@ -387,38 +385,11 @@ patterns. Keep it cheap to load and useful.
   `apps/api/scripts/schemas/events.json` together or the fields are stripped before R2.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
-- 2026-06-10: EntitlementWindowDO batch wallet retries must discard in-memory staged plans before
-  awaiting wallet I/O; reread SQLite and retry optimized so reservation fixes do not turn into
-  per-event sequential writes.
-- 2026-06-12: EntitlementWindowDO batch wallet growth readiness must compare reservation runway
-  against staged batch headroom, not only the current event cost; post-refill wallet-empty denials
-  must be staged before mutating the optimized batch draft.
-- 2026-06-12: EntitlementWindowDO optimized batch wallet growth that hits
-  `maxOutstandingAmount` is exhausted headroom; stage `WALLET_EMPTY` for that event instead of
-  throwing so async ingestion can ack the rest of the customer batch.
-- 2026-06-13: EntitlementWindowDO optimized batch lazy bootstrap should only throw the
-  bootstrap-retry signal for positive projected cost; zero-cost staged events must stay on the
-  compact local commit path without opening a wallet reservation.
-- 2026-06-13: Raw ingestion and reporting queues must not share a DLQ; replay should be an
-  authenticated admin/UI workflow, not a local operator script.
 - 2026-06-13: Dashboard-to-API workflows should use the `@unprice/api` SDK path; avoid bespoke
   internal fetches for public API operations such as ingestion replay.
 - 2026-06-13: Dashboard-to-API project overrides should pass `project_id` through the public SDK
   body and use `validateIsAllowedToAccessProject`; do not add parallel internal auth headers when
   API-key admin/root access already models the permission.
-- 2026-06-13: k6 ingestion-failure testing should create real UI-visible failed rows through the
-  non-production `/v1/events/ingest` failure-test header; keep the marker in `requestId` so
-  frontend replay can replace it before requeueing.
-- 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
-  as the immediate replay source; R2 remains write-once audit storage.
-- 2026-07-05: `unprice_ingestion_events` keeps 60 days in Tinybird for operator visibility, but
-  replay remains bounded by the 30-day ingestion event-age window unless idempotency retention is
-  widened too.
-- 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
-  (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
-  timestamp.
-- 2026-06-19: RunBudgetDO and EntitlementWindowDO names must include `APP_ENV`; copied data across
-  environments can otherwise route to the same Durable Object name for the same project/customer id.
 - 2026-07-11: Subscription phase scheduling must normalize stale `currentCycleEndAt` values to a future boundary; otherwise `updatePhase` clamps the old end to `now` and `createPhase` reports a false overlap.
 - 2026-07-11: Subscription creation must return a conflict when a customer already has an active subscription; explain the one-subscription invariant and direct callers to update the existing subscription.
 - 2026-07-11: Subscription creation checks customer activity before duplicate-subscription handling; map inactive customers to a visible precondition instead of `SUBSCRIPTION_OPERATION_FAILED`, which becomes a generic internal error.
@@ -433,6 +404,9 @@ patterns. Keep it cheap to load and useful.
   need `jurisdiction()` too — use `ingestion/testing/durable-object-namespace-mock.ts`.
 
 ## Next.js And Dashboard
+
+- 2026-11-13: When rendering version pricing, read the server view model from rateCards.forPlanVersion through useVersionPricing (own, hasCard, unpricedFeatureSlugs). Do not parse card names in dashboard code; shared pricing UI lives in apps/nextjs/src/components/pricing/.
+- 2026-11-13: When setting pricing dialog schedules, use epoch milliseconds. Compute markup percentages on the bigint amount before formatting; converting to Number loses precision.
 
 - 2026-10-19: tRPC `infiniteQueryOptions` exists only for inputs with a `cursor` field, and
   `budgets.inspect` pages with `after`; `budget-live.tsx` uses `useInfiniteQuery` with
@@ -480,7 +454,7 @@ patterns. Keep it cheap to load and useful.
   `theme`; `theme` can be `"system"` while the rendered UI needs the actual light/dark palette.
 - 2026-07-09: `.ledger-dots` is a background utility; keep its pseudo-element isolated and behind
   content instead of raising each child panel or text layer.
-- 2026-07-04: Workspace signup should omit `planVersionId` when no pricing/session plan is
+- 2026-07-04: Workspace signup should omit `planVersionId` when no pricing CTA plan is
   selected; sending an empty string blocks the customer signup default-plan resolver.
 - 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind
   `size-*` width/height classes; fixed-size wrappers can make the SVG mark flex-shrink away while
@@ -519,9 +493,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: Customer current-access usage is a per-feature entitlement-period view, not the
   last-30-days evidence view; compute/query each active usage entitlement by its current grant
   `period_key` and keep the UI on realtime polling so reset-specific windows update in place.
-- 2026-07-10: Usage dashboard Tinybird reads query bucketed rollups; floor rolling interval
-  starts to the rollup bucket boundary before sending `start/end`, or first-bucket usage can be
-  hidden while entitlement `period_key` reads still show it.
 - 2026-07-03: Workspace billing overview is self-reflective customer reporting; resolve
   `workspace.unPriceCustomerId` to the customer owning project before calling customer
   current-access, wallet, or usage-dashboard queries.
@@ -530,9 +501,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
   through the React tree even when Radix portals the dialog content; stop propagation on the dialog
   form submit when the inner action must not save the parent form.
-- 2026-06-30: Customer current-access entitlement usage should query Tinybird with computed grant
-  `period_key` values; exact subscription `start/end` windows can drop hourly rollup buckets and
-  hide fresh usage for short entitlement periods.
 - 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
   queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
   preview database reachability.
@@ -542,12 +510,23 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
-- 2026-11-02: Batch snapshot registration and completion by entitlement owner; completed snapshots must not be rewritten on retries.
-- 2026-11-02: Trial reporting must zero accepted prices, as BILL already does.
+- 2026-11-13: When constructing billing, provide a payer-budget gateway. createServiceContext defaults to the HTTP gateway; testInvoicing defaults to a no-op gateway, so pass an explicit gateway to test budget behavior.
+- 2026-11-13: When testing phase changes, control Date.now. Phase changes generate billing periods, so the real clock can add periods outside the scenario.
+
+- 2026-11-04 ([ADR-0008 D2](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d2-a-rate-card-owns-every-price-a-plan-version-owns-the-package)): A plan feature's `config` keeps only `usageMode` and `units`; read every price from the version's card with `rateCards.pricingForPlanVersions`/`rowsForVersions`, and format it with `describeRatePrice` (`@unprice/services/pricing`, client-safe). Templates, `monetization.apply`, and onboarding price a draft through `pricePlanVersion`, one card per version.
+- 2026-11-04: Price every draft target after the completeness check, never inside materialization: a run that wrote all features then failed to price leaves a complete draft. `pricePlanVersion` (`services/src/rate-cards`) adopts a card already named `<slug> <pvId> <currency>` when its unit matches.
+- 2026-11-04: Publishing refuses `unpriced` (no card in the version's currency, or a plan feature without a current or scheduled row). A draft's new currency deletes its other-currency card assignments.
+- 2026-11-04: `RateCardService` writes clear `cache.planVersion` for every version on the card; `planVersionList` keys are filter combinations, so both namespaces go stale after `CARD_REFRESH_MS`.
+- 2026-11-04: `monetization.get` reads prices back from the card in canonical decimals, so the boundary canonicalizes prices on parse ("0.10" hashes as "0.1"); a feature whose card rows a decimal price cannot state makes its plan unrepresentable.
+- 2026-11-03: Tiers are graduated only (volume and `tierMode` removed, U1). A graduated config
+  whose higher tier has a smaller flat fee still prices a positive usage delta negatively (the seeded
+  plans do at 1000 -> 1001), so never assume tier cost deltas are non-negative.
+- 2026-11-04 ([ADR-0008 D4](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d4-usage-is-priced-once-at-ingestion)): `billPeriod` seals the statement key through `PayerBudgetGateway.seal` at `max(now, period end + 1)` (a phase's last statement ends 1 ms past its inclusive end), bills each statement's amount as priced at ingestion, and prices recurring items from the plan card with `priceQuantity`, prorated over the period clipped to its phase. A metered period without a statement bills zero; one still open blocks the invoice for a retry.
+- 2026-11-04: `completeInvoiced` runs before and after every invoice and completes each sealed statement whose billing period is invoiced or voided, so a completion lost after a commit heals on the next run.
+- 2026-11-04: A canceled subscription's machine is final; invoice it with `BillingService.invoiceCanceledSubscription` (an immediate cancel passes grace 0, the invoicing job the usual grace). Billing-period capping only reaches phases that ended within the lookback, so proration also clips to the phase.
+- 2026-11-04: Service integration plans price recurring items only from rate cards: the plan seeds carry `card_test_arrear`/`card_test_advance`; a test that inserts a recurring feature must add its row, or it bills free.
 - 2026-11-02: Wallet quantity excludes free usage accepted before reservation allocation. A correction can cross that boundary; keep grant usage exact and floor the wallet quantity at zero while preserving captured and pending quantities.
 
-- 2026-10-27: Billing snapshot rollout uses fresh entitlement IDs, DO state, and billing periods;
-  register before acceptance and seal before wallet flush. Do not add legacy marker or recovery paths.
 - 2026-10-27: When collection succeeds, settle the receivable before saving `paid`; keep failed
   settlement eligible for retry with the existing invoice idempotency key.
 - 2026-10-27: When checking invoice readiness, include all pending rows for the statement across
@@ -588,9 +567,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-22: Invoice-visible wallet captures must also carry
   `feature_plan_version_item_id`; `billPeriod` uses it with `billing_period_id` to avoid
   re-rating already captured capped-wallet usage.
-- 2026-06-22: Budget runs do not create separate "run" invoice lines; run sync events report
-  meter facts that bill through the subscribed usage features, so inspect feature-period invoices
-  and ledger metadata when reconciling run charges.
 - 2026-06-22: External-reservation entitlement applies must roll back meter/grant writes before
   caching `RUN_BUDGET_EXCEEDED`; only accepted run events should advance usage state.
 - 2026-06-13: Dashboard-initiated provider return URLs should resolve from
@@ -628,8 +604,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-07: `createPhase` status decisions must use the resolved/stamped
   `paymentMethodIdToUse`; sandbox defaults can be discovered during phase creation and should
   not park direct signup in `pending_payment`.
-- 2026-06-07: Wallet-backed usage invoices should project wallet capture ledger lines; do not
-  re-rate capped wallet captures through Tinybird during BILL or they can zero/duplicate invoices.
 - 2026-06-07: Wallet capture ledger metadata must include `feature_slug` and `quantity`; invoice
   read models should consume ledger-projected descriptions/quantities instead of looking up usage
   feature labels from billing periods.
@@ -637,27 +611,17 @@ patterns. Keep it cheap to load and useful.
   Next.js phase form should not reset a selected payment method from plan-version defaults.
 - 2026-06-07: Transaction-backed phase creation must materialize billing periods after the outer
   transaction commits and before wallet activation; async `waitUntil` period generation can race
-  immediate usage ingestion and leave EntitlementWindowDO without invoice context.
+  immediate usage and leave the payer budget without a statement period.
 - 2026-06-12: Subscription machine activation already runs under the subscription lock during
   renewals; call billing-period materialization with `lock: false` from that actor, or
   `generateBillingPeriods` will reacquire the same lock and park the subscription in
-  `pending_activation`. Ingestion catch-up must retry `activateWallet` for subscriptions already
-  parked there instead of fanning out to EntitlementWindowDO with stale billing context.
-- 2026-06-12: Ingestion catch-up must materialize per-item billing periods for active/trialing
-  subscriptions even when the subscription cycle is not due for renewal; usage feature cadences can
-  be shorter than the subscription cycle and still need invoice context before DO fanout.
-- 2026-07-03: Sync usage consume must catch up and reload billing-period context before
-  EntitlementWindowDO fanout; if invoice context is still missing for a capped entitlement, return a
-  `LATE_EVENT_CLOSED_PERIOD` rejection instead of letting wallet bootstrap throw a generic 500.
+  `pending_activation`.
 - 2026-07-03: tRPC subscription machine adapters must map expected lifecycle refusals like early
   renew, invalid invoice action, and `SUBSCRIPTION_BUSY` to non-500 errors; `INTERNAL_SERVER_ERROR`
   is masked to "Internal server error" in the dashboard.
 - 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
   `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
   can return signup `success=false` with a hidden `generateBillingPeriods` error.
-- 2026-06-06: `explainCharge` treats invoice rows as grouped buckets: use ledger totals for the
-  line amount, query Tinybird by period key when available, and fall back to the billing window
-  when the key cannot be derived.
 - 2026-06-06: Draft plan-version billing changes should cascade feature billing/reset cadences
   unless `metadata.billingCadenceOverride` or `metadata.resetCadenceOverride` is true; missing
   override flags mean the feature follows the plan. Usage feature billing may be shorter or longer
@@ -703,21 +667,10 @@ patterns. Keep it cheap to load and useful.
   wallet service errors stay retryable infrastructure failures.
 - 2026-05-17: Reserve ledger source ids must be reservation-scoped; keep period-scoped DO keys as
   trace metadata only so same-period re-bootstrap cannot replay old reserve transfers.
-- 2026-05-17: EntitlementWindowDO inactivity final-flush uses 1h in production/test and 60s in
-  `NODE_ENV=development`; ledger freshness flushes use 10m in deployed envs.
-- 2026-05-18: EntitlementWindowDO alarm scheduling should use flush cadence only when
-  `consumedAmount > flushedAmount`; fully flushed live reservations should wake on lifecycle
-  deadlines, not stale `lastFlushedAt`.
-- 2026-06-08: EntitlementWindowDO time-based wallet flushes with `pendingRefillAmount=0` are
-  capture-only; do not call reservation extension for a zero-amount refill or alarms can keep
-  retrying flush/refill work.
 - 2026-06-08: Wallet capture usage transfers are statement-keyed; capped-wallet statement tests
   should assert transfer source types, not raw pgledger debit/credit entry counts.
 - 2026-06-08: API error mapping must treat `UnPriceWalletError("WALLET_LEDGER_FAILED")` as an
   infrastructure 500; only `WALLET_EMPTY` is a business ingestion denial.
-- 2026-06-09: EntitlementWindowDO apply logs must keep wallet-empty denial fields and wallet
-  service error fields mutually exclusive; stale `error_message` values in Axiom can misclassify
-  operational underfunding as ledger failure.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.
@@ -756,7 +709,6 @@ patterns. Keep it cheap to load and useful.
 
 ### 2026-06-12: Queued usage ingestion may catch up subscription renewals, but entitlement context stays read-only.
 
-- Billing-period generation and wallet grant issuance belong to the subscription lifecycle. If queued ingestion sees subscription-backed usage past the funded billing window, call the subscription machine under its existing lock, then reload entitlement context before fanout.
 - Do not add billing-period writes to `internal/services/src/ingestion/entitlement-context.ts`; that loader reads/caches entitlements and billing contexts only.
 
 Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
@@ -778,9 +730,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-21: Tooling that calls `unprice.analytics.usage.get` should consume the public SDK row
   shape (`usage` plus formatted `spending`), not raw analytics/lake fields such as `value_after`
   or `amount_after`.
-- 2026-06-21: k6 scripts should follow the generated public SDK operation paths, for example
-  `access.entitlements.list`, `access.check`, `usage.record`, `usage.consume`, and
-  `runs.{start,consume,end,get}`; old product paths can return 404 after API contract updates.
 - 2026-06-20: Public Hono routes must use `defineEndpointContract`; for `audience: "public"`,
   SDK-exposed operations must set `sdk.path` and `operationId` must equal
   `sdk.path.join(".")` so OpenAPI, docs, and `@unprice/api` resources generate from one
@@ -841,8 +790,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   posting a zero-amount ledger transfer.
 
 ## UI And Dashboard
-- 2026-08-25: AI-first landing examples should lead with `reservations.reserve` before provider
-  work and `reservation.settle` after usage; keep `access.check` labeled as read-only shadow mode.
 - Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
 - 2026-07-15: When WAAPI choreography must react to layout that differs per state (MoneyPath's
   stacked one-outcome column), stamp the state as a data attribute on the stage synchronously in
@@ -856,7 +803,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   query input timestamp on each poll; refetching a frozen `{ from, to }` window only reloads old
   data.
 - 2026-06-15: Customer-visible relative usage dashboards should poll on the same 30s cadence as
-  the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Tinybird
+  the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Basin SQL
   throttling in the tRPC cache instead of bypassing it from the UI.
 - 2026-06-15: Usage dashboard money must reconcile after currency-minor rounding; header totals,
   feature rows, and top consumers should share the same rounded allocation source instead of each
@@ -895,6 +842,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
 
 ## Tests, Tooling, And Docs
+
+- 2026-11-03: Zod 4 throws on `.pick`/`.omit` of a refined object; export the unrefined fields
+  schema and refine each composition (see `validators/rate-cards.ts`). Postgres `jsonb` reorders
+  object keys (shorter first), so compare stored JSON with `canonicalJson` (`rate-cards/wire.ts`)
+  and expect stored-map iteration order, not authoring order.
 
 - 2026-10-27: Select integration databases through `BILLING_TEST_DATABASE_URL` in the shared test
   helper; Vitest worker `env` alone does not select the database used by global setup.
@@ -950,20 +902,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-05-09: Focused integration scripts are useful when DB state must remain for `psql`
   inspection.
 - 2026-05-09: Wallet reservation callers with event time should pass `effectiveAt`.
-- 2026-05-17: EntitlementWindowDO non-final flush retries must reuse persisted
-  `pending_refill_amount`; do not recompute adaptive refill size for an existing
-  `pending_flush_seq`.
-- 2026-05-29: EntitlementWindowDO async compaction must commit idempotency results and
-  fact outbox intent in the same durable SQLite transaction; never advance replay seals
-  without recoverable priced facts.
 - 2026-05-29: Compact-only ingestion DOs use batch tables as the replay source:
   `idempotency_key_batches`, `meter_facts_outbox_batches`, and `ingestion_audit_batches`.
   Do not reintroduce per-event DO tables or a DB-backed meter storage adapter.
 - 2026-05-29: Async ingestion must not ack when audit DO commit fails after entitlement apply;
   throw so the queue retries against entitlement idempotency instead of losing audit intent.
-- 2026-05-17: EntitlementWindowDO wallet retries must persist the whole ledger intent
-  (`pending_flush_seq`, `pending_flush_amount`, refill/final flags); one ledger idempotency
-  key must never replay with a recomputed financial payload.
 - 2026-05-10: Billing properties stay replayable with `UNPRICE_PROPERTY_SEED` and tunable with
   `UNPRICE_PROPERTY_RUNS`.
 - 2026-05-10: Keep DB-backed properties separate from pure/fake-service properties.
@@ -1009,28 +952,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `amount_after`/`value_after` per `customer_entitlement_id + grant_id + period_key`, then sum to
   the visible feature. Rank latest facts by a DO-owned `fact_sequence`; treat customer
   `idempotency_key` as dedupe identity and legacy fallback only.
-- 2026-06-15: Agent-run budget reservations use `ownerType="agent_run"` / `ownerId=runId`;
-  entitlement-window reservations keep `ownerType="entitlement_window"` / `ownerId=entitlementId`.
-  Active reservation dedupe stays owner-period scoped so both systems coexist on the same wallet.
-- 2026-07-09: RunBudgetDO may cache dynamic module imports, but `createConnection({ singleton:
-  false })`, `WalletService`, `LedgerGateway`, and database proxies must be constructed per external
-  wallet operation/invocation and never retained across Worker/DO requests; Neon WebSocket I/O is
-  request-scoped.
-- 2026-06-19: Run sync events must resolve entitlements before delegating to RunBudgetDO; the
-  `applyRunSyncEvent` use case uses `RunEntitlementResolver` (backed by the SWR-cached
-  `IngestionEntitlementContextLoader` + `IngestionEntitlementRouter` + subscription catch-up) to
-  validate that the customer has an active entitlement and billing-period invoice context for the
-  `featureSlug`/`eventSlug`, then passes real `entitlement` + `grants` through the DO contract to
-  `EntitlementWindowDO`. The DO is addressed using the standard naming scheme
-  (`${appEnv}:${projectId}:${customerId}:${customerEntitlementId}`) so it shares state with the
-  normal ingestion path.
-- 2026-06-22: Invoice-time wallet reservation flushing must include both EntitlementWindowDO and
-  RunBudgetDO pending capture buckets for the statement key before invoice totals are projected.
-- 2026-08-24: Run settlement is post-work accounting: commit full meter facts without feature or
-  run-budget rejection, cap wallet capture buckets to funded run money, and let only `runs.end`
-  close the parent run.
-- 2026-08-24: A run reservation maximum is a hard capture ceiling; settlement records full incurred
-  usage but must not extend the reservation or capture the unfunded difference.
 - 2026-08-24: Run settlement tests must cross the budget cumulatively across separate steps and
   prove full usage, capped funded capture, replay safety, and terminal reconciliation together.
 - 2026-06-22: Ingestion billing-period context should expose only `pending` periods; allowing
@@ -1070,14 +991,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-08-02: Use a zero-priced first graduated usage tier for included units and a later paid
   tier for overage; `customers.signUp.creditLineAmountMinor` is the separate per-period customer
   spend cap, expressed in currency minor units.
-- 2026-08-02: A nonzero budgeted run reserves wallet funds at `runs.start`; an active subscription
-  without a wallet grant, capped credit line, or top-up fails before work begins. Size the credit
-  line for concurrent reservation holds as well as eventual metered spend.
-- 2026-08-03: Billing-period reporting must retain `customer_entitlement_id` and fail closed when
-  facts inside the active reporting envelope lack a `billing_period_id`; that identifier is the
-  reporting attribution boundary.
-- 2026-08-03: SDK `workloadType` is a closed enum (`agent`, `workflow`, `job`, `tool`, `custom`);
-  place product-specific categories in metadata rather than inventing enum members.
 - 2026-08-03: Direct signup replay succeeds only after billing periods plus activation/invoice
   side effects complete; reconcile partial state or surface a failure rather than reporting
   semantic success early.
@@ -1094,13 +1007,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `APP_BASE_DOMAIN` hyphenated for preview aliases.
 - 2026-09-19: Never apply the Vercel preview alias to a localhost app, even when preview variables
   are inherited; local auth must use `http://app.localhost:<port>`.
-- 2026-09-19: A Durable Object must always hold an alarm — the alarm is the only thing that can
-  ever call `deleteAll()` on itself, so an object that goes quiet without one keeps its SQLite
-  storage billed forever. `EntitlementWindowDO` and `RunBudgetDO` arm a prompt lifecycle alarm
-  during bootstrap; row-level `DELETE`s are not a substitute.
-- 2026-09-19: Contract tests that assert exact alarm timestamps must clear the alarm the DO's own
-  bootstrap arms (`RunBudgetDO.workers.test.ts`), or a lifecycle alarm that happens to fall
-  earlier silently swallows the `setAlarm` the test is asserting on.
 - 2026-10-16: k6 cannot share state across VUs, so a load test that must compare a server total
   with what the client saw uses a `Counter` that VUs add to and `teardown` subtracts from, with a
   `count==0` threshold (`tooling/k6/budgets.ts`). Counters accept negative values, and a non-zero
@@ -1179,3 +1085,39 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-27: Metering batches must preserve a persisted pending flush payload under its sequence. Coalesce only new draft flush intent.
 - 2026-10-27: Billing integration fixtures must declare accepted usage independently from wallet captures and pass their gateway explicitly.
 - 2026-10-27: Use classes for Vitest constructor mocks. `pnpm validate` can convert anonymous function mocks to non-constructible arrows.
+- 2026-11-03 ([ADR-0008 D8](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d8-tinybird-is-deleted)): Web analytics rows go through `createWebEventsWriter` (validates with `webEventRowSchema`); a Pipelines stream accepts an invalid row and drops it silently.
+- 2026-11-03: Web analytics reads are SQL builders in `services/src/analytics/web-analytics.ts` run by the `BasinSql` port. Escape every value with `sqlString`/`sqlTimestamp`; test with literal SQL and a fake port.
+- 2026-11-04: An unauthenticated beacon (`/api/tracking`) parses its payload into its own object with `~/lib/web-tracking` schemas; never spread payload keys next to validated envelope ids, and bound every id with `attributionIdSchema`.
+- 2026-11-04: Sign-up attribution travels only as explicit `planVersionId` and `pageId`: the pricing CTA URL carries them, `/auth/*` hands them to `/new`, and sign-up validates them. Never resolve a plan from web analytics; Basin exposes a plan click minutes later.
+- 2026-11-04 (ADR-0008 D6, D7): Usage and access routes reach the payer budget through `meterPayerUsage` and `checkPayerAccess` with a `CloudflareBudgetClient`, never `runBudgetVerb`. Refused events go to `budget_journal` with `seq` 0, operation id `r:<idempotency key>`, and status `rejected`.
+- 2026-11-04: `meterPayerUsage` never throws for a transport failure: the failing customer's remaining events answer `unavailable` (wire `UNAVAILABLE`/503, logged, not journaled). Usage routes report the whole batch once through `callBudget` + `batchOutcome` (`budget.outcomes` counts); never call `callBudget` per event, or the wide event keeps only the last one.
+- 2026-11-04: `vi.clearAllMocks()` keeps queued `mockResolvedValueOnce` answers, so a test that fails before the call leaks them into the next test. Route tests that queue answers use `vi.resetAllMocks()` and re-arm the mocks in `beforeEach`.
+- 2026-11-13 (ADR-0008 D7): Usage history reads `budget_journal` through `BudgetJournalReader` (builders in `services/src/analytics/budget-journal.ts`); every query keeps the latest `seq` per `(budget_key, operation_id)` with `QUALIFY ROW_NUMBER()`. Basin SQL has no UNNEST, so `priced.features[]` is read by index up to `FEATURE_SLOTS`; report the overflow row (null `feature_slug`) instead of dropping it.
+- 2026-11-13: Test journal-backed use cases and routes with `journalAnalytics` (`@unprice/services/analytics/journal-fixture`): a real `BudgetJournalReader` over a fake Basin port that parses literal rows with the production row schemas.
+- 2026-11-13 (ADR-0008 D8): Tinybird is gone. Dashboard interval, stat-card and usage-row contracts
+  (`prepareInterval`, `analyticsIntervalSchema`, `statsSchema`, `getUsageResponseSchema`) live in
+  `@unprice/db/validators`; `ServiceDeps` has no `analytics` client. Web analytics reads go through
+  `AnalyticsService`; journal reads go through `BudgetJournalReader`, both over Basin SQL.
+- 2026-11-04: `generate:openapi` needs only a booting worker: a `.dev.vars` copied from the example with `APP_ENV=development`, placeholder `DATABASE_*_URL`s, and every empty key filled serves `/openapi.json` on 8787 without real secrets.
+- 2026-11-05 (ADR-0008 D2): Prices render as a vendor price sheet (`priceTableOf` in `services/src/pricing/price-table.ts`: a line per dimension value, a column per component, "per 1M tokens" in the header), never as the row's formula string. A catalog revision shows only the lines that change (`changeMatrixOf`), old rate beside new.
+- 2026-11-05: A version's own card has no page of its own: `/rate-cards/<id>` redirects it to the version's Prices tab, and only shared cards keep the card route.
+- 2026-11-05: `prefetch` in `~/trpc/server` returns the query's promise. A page whose first paint is the data (not a loading state the client would replace) awaits it before `HydrateClient`; otherwise React logs a hydration mismatch and re-renders the tree.
+- 2026-11-05: Every raw `<input>` gets a 1px gray border from the global stylesheet. An inline table cell input must set `border-0` itself; a transparent border on the wrapper does not hide it.
+- 2026-11-05: `duplicatePlanVersion` spreads the source row into the copy, so every lifecycle field the copy must not inherit (`publishedAt`, `publishedBy`, `archived*`) is reset explicitly. A copy that kept `publishedAt` made its own card live and every price change on the draft wait for the notice.
+- 2026-11-05: Webpack dev keeps a deleted module in its graph (overlay error "Failed to read source code") until the dev server restarts; the page still renders, the overlay is noise until then.
+- 2026-11-06: An SSR (`renderToString`) test of a component that reads a tRPC query renders its loading branch; seed the cache with `createTRPCOptionsProxy({ client, queryClient })` + `queryClient.setQueryData(trpc.x.y.queryKey(input), data)` to test the loaded UI.
+- 2026-11-06: A feature's price draft must not prefill from a row of another `price.type` (`prefillDraft`): switching Fixed $49 to metered once offered "$49 per unit".
+- 2026-11-06: `plans.listByActiveProject` returns only published versions unless called with `{ published: false }`; a lookup that names cards or versions (drafts included) must pass it.
+- 2026-11-06: The publish-rows form writes one rate; a catalog model row has one per token kind. Replacing a model row from that form drops the other rates, so the dialog warns and points at the catalog markup instead.
+- 2026-11-06: Don't nest a scroll area (`max-h` + `overflow-auto`) inside the dashboard's scrolling page: it traps the wheel and the page stops scrolling. Show the first rows plus "Show all" and let the page grow.
+- 2026-11-06: Dashboard forms use shadcn parts only (`@unprice/ui` Select, Calendar in Popover, Command combobox, Collapsible, Table); no native `type="time"`, `datalist`, `<details>` or `type="search"`.
+- 2026-11-06: A price never changes how a feature is charged: shape (`pricingShape`, now exported) and metered property (`featurePricingOf`) come from the plan feature, as a Stripe price's billing scheme is fixed. "Add a price" shows them read-only.
+- 2026-11-06: `costPlusRevision` diffs every catalog model's latest row, manual ones included, so a markup change overwrites a hand-set model price. Until overrides are protected, the UI prices catalog features only through the markup.
+- 2026-11-06: `model_costs` is global (`pgTableProject` only prefixes the name; no `project_id`); a project's own model costs live in `custom_model_costs` and enter `costPlusPreview` as `"manual"`, so they outrank models.dev for that project only.
+- 2026-11-06: Catalog previews never save policies. `applyPlanVersionCatalogPricing` checks the reviewed feature-scoped hash and commits policy plus rows together; an exact retry writes nothing.
+
+- 2026-11-07: App TypeScript checks do not validate SDK code stored in strings or Markdown. Keep generated snippets and published examples in `sdk-examples-code.test.ts`, which compiles them against the SDK source contracts.
+
+- 2026-11-07: Payer meters support `sum` and `count`. Validate finite usage reset cadences before publishing; annual invoice billing needs an explicit supported reset for those limits.
+- 2026-11-07: `meterConfig.groupBy` sets rate-card price dimensions. Preserve it through monetization get/apply; it is active configuration.
+- 2026-11-07: Journal `data.unit` owns historical amounts. Group by that unit before adding amounts; invoice statement lookups must scan all allowed priced features, independently of dashboard expansion limits.

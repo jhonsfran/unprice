@@ -1,11 +1,20 @@
 import { createRoute } from "@hono/zod-openapi"
 import { inspectBudgetRequestSchema, inspectBudgetResponseSchema } from "@unprice/db/validators"
+import { formatAmount } from "@unprice/money"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetToWire, inspectBudget, toWire } from "./budget-verb"
+import { inspectBudget } from "./budget-verb"
+import {
+  admissionToWire,
+  amountToWire,
+  budgetToWire,
+  operationToWire,
+  periodToWire,
+  reservationToWire,
+} from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -39,6 +48,23 @@ export const registerInspectBudgetInternalV1 = (app: App) =>
   app.openapi(route, async (c) => {
     // `internalKeyAuth` admits only main and internal keys, so the project comes from the body.
     const { projectId, key, ...query } = c.req.valid("json")
-    const { budget, ...inspection } = await inspectBudget(c, { projectId, key }, query)
-    return c.json({ ...toWire(inspection), budget: budgetToWire(budget) }, HttpStatusCodes.OK)
+    const { budget, history, expiringNext, listed, closedRecently, found, probe } =
+      await inspectBudget(c, { projectId, key }, query)
+    return c.json(
+      {
+        budget: budgetToWire(budget),
+        history: history.map(periodToWire),
+        expiringNext: { ...expiringNext, rows: expiringNext.rows.map(reservationToWire) },
+        listed: amountToWire(listed),
+        closedRecently: closedRecently.map(operationToWire),
+        ...(found !== undefined && { found: found && operationToWire(found) }),
+        ...(probe && {
+          probe: {
+            amount: formatAmount(probe.amount),
+            rejection: probe.rejection && admissionToWire(probe.rejection),
+          },
+        }),
+      },
+      HttpStatusCodes.OK
+    )
   })

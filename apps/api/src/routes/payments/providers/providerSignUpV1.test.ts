@@ -16,6 +16,8 @@ const useCaseMocks = vi.hoisted(() => ({
   completeProviderSignUp: vi.fn(),
 }))
 
+const webEvents = vi.hoisted(() => ({ send: vi.fn() }))
+
 vi.mock("@unprice/services/use-cases", () => ({
   completeProviderSignUp: useCaseMocks.completeProviderSignUp,
 }))
@@ -39,6 +41,11 @@ describe("providerSignUpV1 route", () => {
 
     expect(response.status).toBe(302)
     expect(response.headers.get("location")).toBe("https://example.com/success")
+    // the use case records the signup web event through the request's writer
+    expect(useCaseMocks.completeProviderSignUp).toHaveBeenCalledWith(
+      expect.objectContaining({ webEvents }),
+      expect.objectContaining({ projectId: "proj_123", sessionId: "sess_123" })
+    )
   })
 
   it("maps CUSTOMER_SESSION_NOT_FOUND to NOT_FOUND", async () => {
@@ -103,9 +110,7 @@ function createTestApp() {
       error: vi.fn(),
       debug: vi.fn(),
     })
-    c.set("analytics", {
-      ingestEvents: vi.fn(),
-    })
+    c.set("webEvents", webEvents)
     c.set("waitUntil", vi.fn())
 
     await next()

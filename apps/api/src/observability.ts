@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers"
 import type { Logger } from "@unprice/logs"
 import {
-  runDoOperation as _runDoOperation,
   createLogger,
   createMetricsLogger,
   createUnpriceDrain,
@@ -215,21 +214,4 @@ function mergeObjects(left: unknown, right: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-}
-
-/**
- * Wraps @unprice/observability's runDoOperation, injecting the API drain.
- * DOs call this without needing to know about the drain.
- */
-export function runDoOperation<T>(
-  params: {
-    requestId: string
-    service: string
-    operation: string
-    baseFields?: Record<string, unknown>
-    waitUntil?: (promise: Promise<unknown>) => void
-  },
-  fn: (logger: Logger) => Promise<T>
-): Promise<T> {
-  return _runDoOperation({ ...params, drain: apiDrain ?? undefined }, fn)
 }

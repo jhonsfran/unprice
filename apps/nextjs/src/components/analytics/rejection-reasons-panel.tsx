@@ -4,7 +4,6 @@ import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
 import { ArrowRight } from "lucide-react"
-import { useMemo } from "react"
 import { EvidenceFrame, EvidenceSection } from "./evidence-panel"
 import type { IngestionRejection } from "./ingestion-health-model"
 
@@ -27,18 +26,16 @@ export function RejectionReasonsPanel({
   presentation = "card",
   className,
 }: RejectionReasonsPanelProps) {
-  const rejectionGroups = useMemo(() => groupVisibleRejections(rejections), [rejections])
-
   if (presentation === "section") {
     return (
       <EvidenceSection
         title="Top rejection reasons"
-        description="Business denials grouped by reason, event, and source."
+        description="Business denials grouped by reason, event, and operation."
         className={className}
         contentClassName="mt-3"
         titleClassName="text-base"
       >
-        <RejectionReasonsList rejectionGroups={rejectionGroups} onSelectFilter={onSelectFilter} />
+        <RejectionReasonsList rejections={rejections} onSelectFilter={onSelectFilter} />
       </EvidenceSection>
     )
   }
@@ -47,29 +44,25 @@ export function RejectionReasonsPanel({
     <Card className={cn("border-muted/60", className)}>
       <CardHeader>
         <CardTitle>Top rejection reasons</CardTitle>
-        <CardDescription>Business denials grouped by reason, event, and source.</CardDescription>
+        <CardDescription>Business denials grouped by reason, event, and operation.</CardDescription>
       </CardHeader>
       <CardContent className="pb-6">
-        <RejectionReasonsList
-          rejectionGroups={rejectionGroups}
-          onSelectFilter={onSelectFilter}
-          unframed
-        />
+        <RejectionReasonsList rejections={rejections} onSelectFilter={onSelectFilter} unframed />
       </CardContent>
     </Card>
   )
 }
 
 function RejectionReasonsList({
-  rejectionGroups,
+  rejections,
   onSelectFilter,
   unframed = false,
 }: {
-  rejectionGroups: VisibleRejectionGroup[]
+  rejections: IngestionRejection[]
   onSelectFilter?: (filter: RejectionReasonSelection) => void
   unframed?: boolean
 }) {
-  if (rejectionGroups.length === 0) {
+  if (rejections.length === 0) {
     return (
       <EvidenceFrame
         variant="dashed"
@@ -88,7 +81,7 @@ function RejectionReasonsList({
         unframed ? "rounded-md border border-border bg-transparent" : "bg-card/40"
       )}
     >
-      {rejectionGroups.slice(0, 5).map((rejection) => (
+      {rejections.slice(0, 5).map((rejection) => (
         <button
           key={`${rejection.rejectionReason ?? "unknown"}:${rejection.eventSlug}:${rejection.sourceType}`}
           type="button"
@@ -107,7 +100,6 @@ function RejectionReasonsList({
             </span>
             <span className="block truncate font-mono text-muted-foreground text-xs">
               {rejection.eventSlug} / {rejection.sourceType}
-              {rejection.sourceCount > 1 ? ` · ${rejection.sourceCount} sources` : null}
             </span>
           </span>
           <span className="flex shrink-0 items-center gap-2">
@@ -118,43 +110,4 @@ function RejectionReasonsList({
       ))}
     </EvidenceFrame>
   )
-}
-
-type VisibleRejectionGroup = IngestionRejection & {
-  sourceCount: number
-}
-
-function groupVisibleRejections(rejections: IngestionRejection[]): VisibleRejectionGroup[] {
-  const groups = new Map<
-    string,
-    Omit<VisibleRejectionGroup, "sourceCount"> & { sourceIds: Set<string> }
-  >()
-
-  for (const rejection of rejections) {
-    const key = [
-      rejection.rejectionReason ?? "unknown",
-      rejection.eventSlug,
-      rejection.sourceType,
-    ].join(":")
-    const group = groups.get(key)
-
-    if (!group) {
-      groups.set(key, {
-        ...rejection,
-        sourceIds: new Set([rejection.sourceId]),
-      })
-      continue
-    }
-
-    group.eventCount += rejection.eventCount
-    group.lastSeenAt = Math.max(group.lastSeenAt, rejection.lastSeenAt)
-    group.sourceIds.add(rejection.sourceId)
-  }
-
-  return Array.from(groups.values())
-    .map(({ sourceIds, ...group }) => ({
-      ...group,
-      sourceCount: sourceIds.size,
-    }))
-    .sort((a, b) => b.eventCount - a.eventCount || b.lastSeenAt - a.lastSeenAt)
 }

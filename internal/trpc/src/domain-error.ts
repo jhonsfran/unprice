@@ -18,6 +18,7 @@ export function domainErrorToTrpcError(
   if (kind) {
     return new TRPCError({
       code: KIND_TO_TRPC[kind],
+      cause: error,
       message: error instanceof Error ? error.message : fallbackMessage,
     })
   }

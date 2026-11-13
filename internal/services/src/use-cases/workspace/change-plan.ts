@@ -12,10 +12,7 @@ import {
   isMissingPaymentMethodError,
 } from "../../payment-provider/errors"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
-import {
-  type GetCustomerCurrentAccessAnalytics,
-  getCustomerCurrentAccess,
-} from "../customer/get-current-access"
+import { getCustomerCurrentAccess } from "../customer/get-current-access"
 import {
   SubscriptionChangePhasePlanError,
   changeSubscriptionPhasePlan,
@@ -94,7 +91,6 @@ type WorkspaceBillingContext = {
 export type WorkspaceChangePlanDeps = {
   services: Pick<ServiceContext, "billing" | "customers" | "plans" | "subscriptions">
   db: Database
-  analytics: GetCustomerCurrentAccessAnalytics
   logger: Logger
   now?: () => number
 }
@@ -277,7 +273,6 @@ export async function changeWorkspacePlan(
   const accessResult = await getCustomerCurrentAccess(
     {
       db: deps.db,
-      analytics: deps.analytics,
       logger: deps.logger,
       now: deps.now,
     },

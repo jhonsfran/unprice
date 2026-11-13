@@ -1,11 +1,12 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { customerProviderIds, customerSessions, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { type WebEventsWriter, recordWebEvents } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { signupWebEventRow } from "../../analytics/web-analytics"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
@@ -13,10 +14,10 @@ import { checkPaymentProviderAvailability } from "../payment-provider/availabili
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
-  services: Pick<ServiceContext, "plans" | "customers" | "subscriptions" | "billing">
+  services: Pick<ServiceContext, "plans" | "customers" | "subscriptions" | "billing" | "pages">
   db: Database
   logger: Logger
-  analytics: Analytics
+  webEvents: WebEventsWriter
   waitUntil: (promise: Promise<unknown>) => void
 }
 
@@ -132,6 +133,39 @@ async function getExternalIdReplay(
   })
 }
 
+/**
+ * The page a pricing CTA named, kept only when it belongs to the project and lists the
+ * plan version. Attribution never fails a sign-up: an unusable page id or a failed read is logged
+ * and dropped.
+ */
+async function resolvePageAttribution(
+  deps: SignUpDeps,
+  opts: { projectId: string; pageId: string; planVersionId: string }
+): Promise<string | null> {
+  const { err, val: page } = await deps.services.pages.getPageById({
+    projectId: opts.projectId,
+    pageId: opts.pageId,
+  })
+
+  if (err) {
+    deps.logger.warn("ignoring sign-up page attribution", {
+      page_id: opts.pageId,
+      reason: "page lookup failed",
+    })
+    return null
+  }
+
+  if (page?.selectedPlans.some((plan) => plan.id === opts.planVersionId)) {
+    return page.id
+  }
+
+  deps.logger.warn("ignoring sign-up page attribution", {
+    page_id: opts.pageId,
+    reason: page ? "plan version not on page" : "page not in project",
+  })
+  return null
+}
+
 async function resolvePlanVersion(
   deps: SignUpDeps,
   opts: SignUpInput
@@ -139,62 +173,13 @@ async function resolvePlanVersion(
   Result<{ planVersion: PlanVersionWithProject; pageId: string | null }, UnPriceCustomerError>
 > {
   const { input, projectId } = opts
-  const { planVersionId, defaultCurrency, planSlug, sessionId, billingInterval } = input
+  const { planVersionId, defaultCurrency, planSlug, billingInterval } = input
 
   let planVersion: PlanVersionWithProject | null = null
   let pageId: string | null = null
 
-  if (sessionId) {
-    deps.logger.set({
-      business: {
-        operation: "customer.sign_up.resolve_plan",
-        project_id: projectId,
-      },
-    })
-
-    const data = await deps.analytics.getPlanClickBySessionId({
-      session_id: sessionId,
-      project_id: projectId,
-      action: "plan_click",
-    })
-
-    const session = data.data.at(0)
-
-    if (!session) {
-      if (!planVersionId) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PLAN_VERSION_NOT_FOUND",
-            message: "Session not found",
-          })
-        )
-      }
-
-      planVersion = await deps.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
-        })
-        .then((data) => data ?? null)
-    } else {
-      pageId = session.payload.page_id
-
-      planVersion = await deps.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(eq(version.id, session.payload.plan_version_id), eq(version.projectId, projectId)),
-        })
-        .then((data) => data ?? null)
-    }
-  } else if (planVersionId) {
+  // An explicit plan version (the pricing page puts the clicked one on the CTA link) wins.
+  if (planVersionId) {
     planVersion = await deps.db.query.versions
       .findFirst({
         with: {
@@ -209,6 +194,23 @@ async function resolvePlanVersion(
           ),
       })
       .then((data) => data ?? null)
+
+    if (!planVersion) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PLAN_VERSION_NOT_FOUND",
+          message: "Plan version not found in this project",
+        })
+      )
+    }
+
+    if (input.pageId) {
+      pageId = await resolvePageAttribution(deps, {
+        projectId,
+        pageId: input.pageId,
+        planVersionId: planVersion.id,
+      })
+    }
   } else if (planSlug) {
     const plan = await deps.db.query.plans
       .findFirst({
@@ -268,7 +270,7 @@ async function resolvePlanVersion(
       return Err(
         new UnPriceCustomerError({
           code: "NO_DEFAULT_PLAN_FOUND",
-          message: "Default plan not found, provide a plan version id, slug or session id",
+          message: "Default plan not found, provide a plan version id or slug",
         })
       )
     }
@@ -320,6 +322,17 @@ async function resolvePlanVersion(
       new UnPriceCustomerError({
         code: "PLAN_VERSION_NOT_ACTIVE",
         message: "Plan version is not active",
+      })
+    )
+  }
+
+  // Enterprise plans are sold through a conversation, not self-serve sign-up, whichever way the
+  // plan version was picked.
+  if (planVersion.plan.enterprisePlan) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PLAN_VERSION_ENTERPRISE",
+        message: "Enterprise plan versions cannot be signed up for directly",
       })
     )
   }
@@ -394,6 +407,7 @@ async function handlePaymentRequiredFlow(
       },
       planVersion: {
         id: planVersion.id,
+        planId: planVersion.planId,
         projectId: projectId,
         config: config,
         creditLinePolicy: phaseCreditLine.creditLinePolicy,
@@ -401,7 +415,6 @@ async function handlePaymentRequiredFlow(
         paymentMethodRequired: paymentRequired,
       },
       metadata: {
-        sessionId: input.sessionId ?? undefined,
         pageId: pageId ?? undefined,
       },
     })
@@ -448,19 +461,15 @@ async function handlePaymentRequiredFlow(
   }
 
   deps.waitUntil(
-    deps.analytics.ingestEvents({
-      action: "signup",
-      version: "1",
-      session_id: input.sessionId ?? "",
-      project_id: projectId,
-      timestamp: new Date().toISOString(),
-      payload: {
-        customer_id: customerId,
-        plan_version_id: planVersion.id,
-        page_id: pageId,
+    recordWebEvents(deps, [
+      signupWebEventRow({
+        projectId,
+        customerId,
+        planVersion,
+        pageId,
         status: "waiting_payment_provider_setup",
-      },
-    })
+      }),
+    ])
   )
 
   return Ok({
@@ -596,27 +605,27 @@ async function handleDirectProvisioningFlow(
       },
     })
 
-    await activateWalletIfSubscriptionIsActive(deps, {
+    const activated = await activateWalletIfSubscriptionIsActive(deps, {
       subscriptionId: subscription.id,
       projectId,
       context:
         "customer signup wallet activation failed; subscription parked in pending_activation",
     })
 
+    // The periods generated inside the transaction register as the payer budget's statements.
+    if (!activated)
+      await deps.services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
+
     deps.waitUntil(
-      deps.analytics.ingestEvents({
-        action: "signup",
-        version: "1",
-        session_id: input.sessionId ?? "",
-        project_id: projectId,
-        timestamp: new Date().toISOString(),
-        payload: {
-          customer_id: customerId,
-          plan_version_id: planVersion.id,
-          page_id: pageId,
+      recordWebEvents(deps, [
+        signupWebEventRow({
+          projectId,
+          customerId,
+          planVersion,
+          pageId,
           status: "signup_success",
-        },
-      })
+        }),
+      ])
     )
 
     return Ok({

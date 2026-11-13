@@ -61,7 +61,7 @@ const usageConfigSchema = z.discriminatedUnion("mode", [
     mode: z.literal("unit"),
     price: z.string(),
     limit: z.number().optional(),
-    aggregationMethod: z.enum(["count", "sum", "latest"]).optional(),
+    aggregationMethod: z.enum(["count", "sum"]).optional(),
   }),
   z.object({
     mode: z.literal("tier"),
@@ -73,7 +73,7 @@ const usageConfigSchema = z.discriminatedUnion("mode", [
       })
     ),
     limit: z.number().optional(),
-    aggregationMethod: z.enum(["sum", "latest"]).optional(),
+    aggregationMethod: z.literal("sum").optional(),
   }),
 ])
 

@@ -23,24 +23,29 @@ describe("meterConfigSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("rejects max without aggregationField", () => {
-    const result = meterConfigSchema.safeParse({
-      eventId: "event_123",
-      eventSlug: "llm_completion",
-      aggregationMethod: "max",
-    })
+  it.each(["max", "latest"])(
+    "rejects the retired %s aggregation even with a field",
+    (aggregationMethod) => {
+      expect(
+        meterConfigSchema.safeParse({
+          eventId: "event_123",
+          eventSlug: "llm_completion",
+          aggregationMethod,
+          aggregationField: "tokens",
+        }).success
+      ).toBe(false)
+    }
+  )
 
-    expect(result.success).toBe(false)
-  })
-
-  it("rejects latest without aggregationField", () => {
-    const result = meterConfigSchema.safeParse({
-      eventId: "event_123",
-      eventSlug: "llm_completion",
-      aggregationMethod: "latest",
-    })
-
-    expect(result.success).toBe(false)
+  it.each(["filters", "windowSize"])("rejects the unused %s meter field", (field) => {
+    expect(
+      meterConfigSchema.safeParse({
+        eventId: "event_123",
+        eventSlug: "llm_completion",
+        aggregationMethod: "count",
+        [field]: field === "filters" ? { model: "gpt" } : "HOUR",
+      }).success
+    ).toBe(false)
   })
 
   it("rejects removed lifetime aggregations", () => {

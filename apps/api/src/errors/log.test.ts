@@ -3,13 +3,15 @@ import { serializeError } from "./log"
 
 describe("serializeError", () => {
   it("keeps Error details in JSON-safe fields", () => {
-    const error = new TypeError("Missing PIPELINE_EVENTS binding")
+    const error = new TypeError("Missing PIPELINE_BUDGET_JOURNAL binding")
 
     expect(serializeError(error)).toMatchObject({
       type: "TypeError",
-      message: "Missing PIPELINE_EVENTS binding",
+      message: "Missing PIPELINE_BUDGET_JOURNAL binding",
     })
-    expect(JSON.stringify(serializeError(error))).toContain("Missing PIPELINE_EVENTS binding")
+    expect(JSON.stringify(serializeError(error))).toContain(
+      "Missing PIPELINE_BUDGET_JOURNAL binding"
+    )
   })
 
   it("normalizes non-Error throws", () => {

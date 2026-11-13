@@ -1,13 +1,11 @@
 "use client"
 
-import type { DragEndEvent, DragOverEvent, DragStartEvent, DropAnimation } from "@dnd-kit/core"
+import type { DragEndEvent, DragOverEvent } from "@dnd-kit/core"
 import {
   DndContext,
-  DragOverlay,
   MeasuringStrategy,
   MouseSensor,
   TouchSensor,
-  defaultDropAnimationSideEffects,
   pointerWithin,
   useSensor,
   useSensors,
@@ -15,31 +13,15 @@ import {
 import { arrayMove } from "@dnd-kit/sortable"
 import { useRouter } from "next/navigation"
 import { startTransition, useState } from "react"
-import { createPortal } from "react-dom"
 
 import { useMutation } from "@tanstack/react-query"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
-import { GripVertical } from "lucide-react"
 import { useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
-import { FeaturePlan } from "./feature-plan"
-
-const dropAnimation: DropAnimation = {
-  sideEffects: defaultDropAnimationSideEffects({
-    styles: {
-      active: {
-        opacity: "0.5",
-      },
-    },
-  }),
-}
 
 export default function DragDrop({ children }: { children: React.ReactNode }) {
   const [clonedFeatures, setClonedFeatures] = useState<PlanVersionFeatureDragDrop[] | null>(null)
-  // Local state for the DragOverlay clone — keeps drag UI independent of `activeFeature`
-  // so dragging a closed card doesn't accidentally expand it.
-  const [draggingFeature, setDraggingFeature] = useState<PlanVersionFeatureDragDrop | null>(null)
   const router = useRouter()
   const [planFeaturesList, setPlanFeaturesList] = usePlanFeaturesList()
   const [activePlanVersion] = useActivePlanVersion()
@@ -54,8 +36,8 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     })
   )
 
-  // Persist the new order for an already-saved feature.
-  // Library items are added via click-to-add (see feature-list.tsx), not drag, so this only handles reorder.
+  // Persist the new order for an already-saved feature. Features are attached from the palette,
+  // not dragged in, so this only handles reorder.
   function persistOrder(planFeatureVersion: PlanVersionFeatureDragDrop) {
     if (!planFeatureVersion.id) return
 
@@ -95,7 +77,7 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
   }
 
   // sensors are how we control when the drag and drop activates
-  // there are interactive controls inside the feature card (buttons), so we delay
+  // there are interactive controls inside the row (inputs, menus), so we delay
   // drag activation until the user moves a small distance
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -115,8 +97,6 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     const { active } = event
     const activeData = active.data.current
 
-    setDraggingFeature(null)
-
     if (isPublished) {
       return
     }
@@ -131,8 +111,6 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
   }
 
   const onDragCancel = () => {
-    setDraggingFeature(null)
-
     if (clonedFeatures) {
       setPlanFeaturesList(clonedFeatures)
     }
@@ -140,7 +118,7 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     setClonedFeatures(null)
   }
 
-  const onDragStart = (event: DragStartEvent) => {
+  const onDragStart = () => {
     if (isPublished) {
       toastAction(
         "error",
@@ -151,12 +129,6 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
 
     // snapshot for rollback if drag is cancelled
     setClonedFeatures(planFeaturesList)
-
-    if (event.active.data.current?.mode === "FeaturePlan") {
-      setDraggingFeature(
-        event.active.data.current?.planFeatureVersion as PlanVersionFeatureDragDrop
-      )
-    }
   }
 
   const onDragOver = (event: DragOverEvent) => {
@@ -206,25 +178,6 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
       collisionDetection={pointerWithin}
     >
       {children}
-      {typeof window !== "undefined" &&
-        "document" in window &&
-        createPortal(
-          <DragOverlay adjustScale={false} dropAnimation={dropAnimation}>
-            {draggingFeature && (
-              <FeaturePlan
-                mode={"FeaturePlan"}
-                planFeatureVersion={draggingFeature}
-                isDragging
-                renderDragHandle={() => (
-                  <span className="flex size-4 items-center justify-center text-foreground">
-                    <GripVertical className="size-3.5" />
-                  </span>
-                )}
-              />
-            )}
-          </DragOverlay>,
-          document.body
-        )}
     </DndContext>
   )
 }

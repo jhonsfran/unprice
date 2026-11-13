@@ -1,23 +1,38 @@
-import {
-  type Analytics,
-  type Interval,
-  type PageBrowserVisits,
-  type PageOverview,
-  prepareInterval,
-  type statsSchema,
-} from "@unprice/analytics"
 import { type Database, and, between, count, eq } from "@unprice/db"
 import { features, plans, subscriptions, versions } from "@unprice/db/schema"
-import type { Currency } from "@unprice/db/validators"
+import {
+  type Currency,
+  type Interval,
+  prepareInterval,
+  type statsSchema,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import type { BasinSql } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { currencySymbol } from "@unprice/money"
 import { toDecimal } from "dinero.js"
 import type { z } from "zod"
 import type { LedgerGateway } from "../ledger"
+import { warnBasinSqlNotConfigured } from "./basin-sql-warning"
+import {
+  type PageBrowserVisits,
+  type PageCountryVisits,
+  type PageDimension,
+  type PageOverview,
+  type PlansConversion,
+  buildPageDimensionSql,
+  buildPagesOverviewSql,
+  buildPlansConversionSql,
+  foldPagesOverview,
+  foldPlansConversion,
+  overviewBucket,
+  pageDimensionRowSchema,
+  pagesOverviewSqlRowSchema,
+  plansConversionSqlRowSchema,
+  webAnalyticsWindow,
+} from "./web-analytics"
 
 type OverviewStats = z.infer<typeof statsSchema>
-type PageCountryVisits = Awaited<ReturnType<Analytics["getCountryVisits"]>>["data"]
 
 type VisitsPayload<T> = {
   data: T
@@ -27,23 +42,23 @@ type VisitsPayload<T> = {
 export class AnalyticsService {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
+  private readonly basinSql: BasinSql
   private readonly ledgerGateway: LedgerGateway
 
   constructor({
     db,
     logger,
-    analytics,
+    basinSql,
     ledgerGateway,
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
+    basinSql: BasinSql
     ledgerGateway: LedgerGateway
   }) {
     this.db = db
     this.logger = logger
-    this.analytics = analytics
+    this.basinSql = basinSql
     this.ledgerGateway = ledgerGateway
   }
 
@@ -266,138 +281,20 @@ export class AnalyticsService {
     return Ok(stats as OverviewStats)
   }
 
-  public async getCountryVisits({
-    projectId,
-    pageId,
-    intervalDays,
-  }: {
+  public async getCountryVisits(opts: {
     projectId: string
     pageId?: string
     intervalDays?: number
   }): Promise<Result<VisitsPayload<PageCountryVisits>, FetchError>> {
-    if (!pageId || pageId === "_" || pageId === "") {
-      return Ok({ data: [], error: "Page ID is required" })
-    }
-
-    const { val: page, err: pageErr } = await wrapResult(
-      this.db.query.pages.findFirst({
-        where: (table, { eq, and }) => and(eq(table.id, pageId), eq(table.projectId, projectId)),
-      }),
-      (error) =>
-        new FetchError({
-          message: `failed to query page for country visits: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (pageErr) {
-      this.logger.error(pageErr, {
-        context: "failed to query page for country visits",
-        projectId,
-        pageId,
-      })
-      return Err(pageErr)
-    }
-
-    if (!page) {
-      return Ok({ data: [], error: "Page not found" })
-    }
-
-    const days = intervalDays ?? 7
-
-    const { val, err } = await wrapResult(
-      this.analytics
-        .getCountryVisits({
-          page_id: page.id,
-          interval_days: days,
-          project_id: projectId,
-        })
-        .then((res) => res.data),
-      (error) =>
-        new FetchError({
-          message: `failed to fetch country visits: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (err) {
-      this.logger.error(err, {
-        context: "failed to fetch country visits",
-        projectId,
-        pageId,
-        intervalDays: days,
-      })
-      return Err(err)
-    }
-
-    return Ok({ data: val ?? [] })
+    return this.getPageDimensionVisits({ ...opts, dimension: "country" })
   }
 
-  public async getBrowserVisits({
-    projectId,
-    pageId,
-    intervalDays,
-  }: {
+  public async getBrowserVisits(opts: {
     projectId: string
     pageId?: string
     intervalDays?: number
   }): Promise<Result<VisitsPayload<PageBrowserVisits>, FetchError>> {
-    if (!pageId || pageId === "_" || pageId === "") {
-      return Ok({ data: [], error: "Page ID is required" })
-    }
-
-    const { val: page, err: pageErr } = await wrapResult(
-      this.db.query.pages.findFirst({
-        where: (table, { eq, and }) => and(eq(table.id, pageId), eq(table.projectId, projectId)),
-      }),
-      (error) =>
-        new FetchError({
-          message: `failed to query page for browser visits: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (pageErr) {
-      this.logger.error(pageErr, {
-        context: "failed to query page for browser visits",
-        projectId,
-        pageId,
-      })
-      return Err(pageErr)
-    }
-
-    if (!page) {
-      return Ok({ data: [], error: "Page not found" })
-    }
-
-    const days = intervalDays ?? 7
-
-    const { val, err } = await wrapResult(
-      this.analytics
-        .getBrowserVisits({
-          page_id: page.id,
-          interval_days: days,
-          project_id: projectId,
-        })
-        .then((res) => res.data),
-      (error) =>
-        new FetchError({
-          message: `failed to fetch browser visits: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (err) {
-      this.logger.error(err, {
-        context: "failed to fetch browser visits",
-        projectId,
-        pageId,
-        intervalDays: days,
-      })
-      return Err(err)
-    }
-
-    return Ok({ data: val ?? [] })
+    return this.getPageDimensionVisits({ ...opts, dimension: "browser" })
   }
 
   public async getPagesOverview({
@@ -413,84 +310,147 @@ export class AnalyticsService {
       return Ok({ data: [], error: "Page ID is required" })
     }
 
-    const days = intervalDays ?? 7
-
-    if (pageId === "all") {
-      const { val, err } = await wrapResult(
-        this.analytics
-          .getPagesOverview({
-            interval_days: days,
-            project_id: projectId,
-          })
-          .then((res) => res.data),
-        (error) =>
-          new FetchError({
-            message: `failed to fetch pages overview: ${error.message}`,
-            retry: false,
-          })
-      )
-
-      if (err) {
-        this.logger.error(err, {
-          context: "failed to fetch pages overview",
-          projectId,
-          intervalDays: days,
-        })
-        return Err(err)
+    let filterPageId: string | undefined
+    if (pageId !== "all") {
+      const page = await this.findPage({ projectId, pageId })
+      if (page.err) {
+        return page
       }
-
-      return Ok({ data: val ?? [] })
+      if (!page.val) {
+        return Ok({ data: [], error: "Page not found" })
+      }
+      filterPageId = page.val.id
     }
 
-    const { val: page, err: pageErr } = await wrapResult(
+    const days = intervalDays ?? 7
+    const window = webAnalyticsWindow(Date.now(), days)
+    const bucket = overviewBucket(days)
+
+    const rows = await this.query(
+      buildPagesOverviewSql({ projectId, pageId: filterPageId, bucket, window }),
+      pagesOverviewSqlRowSchema,
+      { context: "failed to fetch pages overview", projectId, pageId, intervalDays: days }
+    )
+    if (rows.err) {
+      return rows
+    }
+
+    return Ok({ data: foldPagesOverview(rows.val, { window, bucket, pageId: filterPageId }) })
+  }
+
+  public async getPlansConversion({
+    projectId,
+    intervalDays,
+  }: {
+    projectId: string
+    intervalDays?: number
+  }): Promise<Result<VisitsPayload<PlansConversion>, FetchError>> {
+    const days = intervalDays ?? 7
+    const rows = await this.query(
+      buildPlansConversionSql({ projectId, window: webAnalyticsWindow(Date.now(), days) }),
+      plansConversionSqlRowSchema,
+      { context: "failed to fetch plans conversion", projectId, intervalDays: days }
+    )
+    if (rows.err) {
+      return rows
+    }
+
+    return Ok({ data: foldPlansConversion(rows.val) })
+  }
+
+  private async getPageDimensionVisits<D extends PageDimension>({
+    projectId,
+    pageId,
+    intervalDays,
+    dimension,
+  }: {
+    projectId: string
+    pageId?: string
+    intervalDays?: number
+    dimension: D
+  }): Promise<
+    Result<
+      VisitsPayload<({ page_id: string; visits: number; hits: number } & Record<D, string>)[]>,
+      FetchError
+    >
+  > {
+    // "_" and "all" are the dashboard's no-page selections; these cards need one page.
+    if (!pageId || pageId === "_" || pageId === "all") {
+      return Ok({ data: [], error: "Page ID is required" })
+    }
+
+    const page = await this.findPage({ projectId, pageId })
+    if (page.err) {
+      return page
+    }
+    if (!page.val) {
+      return Ok({ data: [], error: "Page not found" })
+    }
+
+    const days = intervalDays ?? 7
+    const rows = await this.query(
+      buildPageDimensionSql({
+        projectId,
+        pageId: page.val.id,
+        dimension,
+        window: webAnalyticsWindow(Date.now(), days),
+      }),
+      pageDimensionRowSchema(dimension),
+      { context: `failed to fetch ${dimension} visits`, projectId, pageId, intervalDays: days }
+    )
+    if (rows.err) {
+      return rows
+    }
+
+    return Ok({ data: rows.val })
+  }
+
+  private async findPage({
+    projectId,
+    pageId,
+  }: {
+    projectId: string
+    pageId: string
+  }): Promise<Result<{ id: string } | null, FetchError>> {
+    const { val, err } = await wrapResult(
       this.db.query.pages.findFirst({
+        columns: { id: true },
         where: (table, { eq, and }) => and(eq(table.id, pageId), eq(table.projectId, projectId)),
       }),
       (error) =>
         new FetchError({
-          message: `failed to query page for pages overview: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (pageErr) {
-      this.logger.error(pageErr, {
-        context: "failed to query page for pages overview",
-        projectId,
-        pageId,
-      })
-      return Err(pageErr)
-    }
-
-    if (!page) {
-      return Ok({ data: [], error: "Page not found" })
-    }
-
-    const { val, err } = await wrapResult(
-      this.analytics
-        .getPagesOverview({
-          page_id: page.id,
-          interval_days: days,
-          project_id: projectId,
-        })
-        .then((res) => res.data),
-      (error) =>
-        new FetchError({
-          message: `failed to fetch pages overview: ${error.message}`,
+          message: `failed to query page: ${error.message}`,
           retry: false,
         })
     )
 
     if (err) {
-      this.logger.error(err, {
-        context: "failed to fetch pages overview",
-        projectId,
-        pageId,
-        intervalDays: days,
-      })
+      this.logger.error(err, { context: "failed to query page", projectId, pageId })
       return Err(err)
     }
 
-    return Ok({ data: val ?? [] })
+    return Ok(val ?? null)
+  }
+
+  private async query<T>(
+    sql: string,
+    row: z.ZodType<T>,
+    logFields: { context: string } & Record<string, unknown>
+  ): Promise<Result<T[], FetchError>> {
+    const result = await this.basinSql.query(sql, row)
+    if (result.err) {
+      if (result.err.code !== "NOT_CONFIGURED") {
+        this.logger.error(result.err, { context: logFields.context })
+      } else {
+        warnBasinSqlNotConfigured(this.logger, result.err.message, logFields.context)
+      }
+      return Err(
+        new FetchError({
+          message: `${logFields.context}: ${result.err.message}`,
+          retry: result.err.retry,
+        })
+      )
+    }
+    return Ok(result.val)
   }
 }

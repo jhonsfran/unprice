@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { inspectBudgetResponseSchema } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import { type BudgetInspection, UnPriceBudgetError } from "@unprice/services/budgets"
 import type { ExecutionContext } from "hono"
@@ -33,7 +34,7 @@ const hold = {
   kind: "hold",
   id: "h_7",
   idempotencyKey: "job-7",
-  amount: usd(5),
+  reserved: { amount: usd(5), quantities: {} },
   ttlMs: null,
   createdAt: 1_796_083_000_000,
   expiresAt: 1_796_083_900_000,
@@ -45,19 +46,28 @@ const inspection: BudgetInspection = {
     key: "customer:acme",
     unit: "money:USD",
     version: 3,
-    limits: [{ id: "month", window: "month", enforce: "hard", amount: usd(50) }],
+    limits: [
+      {
+        id: "month",
+        window: "month",
+        enforce: "hard",
+        measure: { type: "amount" },
+        amount: usd(50),
+      },
+    ],
     holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
     onUnavailable: "deny",
     closesAt: null,
     closed: false,
     balance: {
       remaining: usd(44),
-      held: usd(5),
+      held: { amount: usd(5), quantities: {} },
       limits: [
         {
           id: "month",
           window: "month",
           enforce: "hard",
+          measure: { type: "amount" },
           amount: usd(50),
           consumed: usd(1),
           held: usd(5),
@@ -80,13 +90,13 @@ const inspection: BudgetInspection = {
   },
   history: [],
   expiringNext: { rows: [hold], examined: 2, next: null },
-  listed: usd(5),
+  listed: { amount: usd(5), quantities: {} },
   closedRecently: [
     {
       kind: "record",
       id: "o:evt-1",
       idempotencyKey: "evt-1",
-      amount: usd(1),
+      usage: { amount: usd(1), quantities: {} },
       createdAt: 1_796_083_100_000,
       crossed: [],
     },
@@ -103,6 +113,7 @@ function call(body: unknown) {
   const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
   app.onError(handleError)
   app.use("*", async (c, next) => {
+    c.set("services", {} as HonoEnv["Variables"]["services"])
     c.set("requestId", "req_test")
     c.set("logger", { set: mocks.log } as unknown as HonoEnv["Variables"]["logger"])
     await next()
@@ -148,7 +159,8 @@ describe("POST /v1/internal/budgets/inspect", () => {
       { projectId: "proj_tenant", key: "customer:acme" },
       { find: { by: "hold", holdId: "h_7" }, probe: usd(2) }
     )
-    const wireHold = { ...hold, amount: "5" }
+    const { reserved: _, ...wireFields } = hold
+    const wireHold = { ...wireFields, amount: "5" }
     expect(await response.json()).toEqual({
       budget: {
         key: "customer:acme",
@@ -210,5 +222,60 @@ describe("POST /v1/internal/budgets/inspect", () => {
       { projectId: "proj_tenant", key: "customer:gone" },
       {}
     )
+  })
+
+  it("answers a hold priced from an event with its estimate's amounts as decimals", async () => {
+    mocks.keyAuth.mockResolvedValue(keyOf({ isMain: false, isInternal: true }))
+    const estimate = {
+      slug: "image.generated",
+      properties: { size: "1024" },
+      at: hold.createdAt,
+      features: [
+        {
+          featureSlug: "images",
+          periodId: "images:inv_2026-11",
+          late: false,
+          cardId: "rc_usd",
+          rowId: "row_image_1024",
+          lines: [
+            {
+              positionKey: 'images|{"size":"1024"}|#event',
+              property: null,
+              before: usd(0),
+              after: usd(1),
+              amount: usd(5),
+              cost: null,
+            },
+          ],
+          meterQuantity: usd(1),
+          amount: usd(5),
+          cost: null,
+        },
+      ],
+    }
+    const priced = { ...hold, estimate }
+    mocks.inspect.mockResolvedValue(
+      Ok({
+        ...inspection,
+        expiringNext: { rows: [priced], examined: 1, next: null },
+        found: priced,
+      })
+    )
+
+    const response = await call({ projectId: "proj_tenant", key: "customer:acme" })
+
+    expect(response.status).toBe(200)
+    // The dashboard's gateway parses the answer: the estimate must survive it.
+    const { found } = inspectBudgetResponseSchema.parse(await response.json())
+    if (found?.kind !== "hold") throw new Error("not a hold")
+    expect(found.estimate).toMatchObject({
+      features: [
+        {
+          amount: "5",
+          meterQuantity: "1",
+          lines: [{ before: "0", after: "1", amount: "5" }],
+        },
+      ],
+    })
   })
 })

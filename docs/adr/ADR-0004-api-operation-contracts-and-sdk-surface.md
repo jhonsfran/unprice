@@ -12,7 +12,7 @@ Accepted
 
 The public Hono API, generated OpenAPI types, docs OpenAPI JSON, and TypeScript SDK can drift independently. Recent drift examples include SDK-generated OpenAPI types mentioning operations that the current API source no longer registers, docs OpenAPI missing current routes, stale docs containing removed realtime operations, and public route operation IDs that expose implementation terms instead of product jobs.
 
-Developers using Unprice think in product workflows: checking access, recording usage, consuming usage with an immediate decision, managing runs, reading wallet/invoice state, configuring customers/plans/features/subscriptions/payment methods, and inspecting analytics or ingestion health. They should not need to know whether a workflow is internally implemented as entitlements, events, analytics, Durable Objects, or provider callbacks.
+Developers using Unprice think in product workflows: checking access, recording usage, consuming usage with an immediate decision, managing budget keys and holds, reading wallet/invoice state, configuring customers/plans/features/subscriptions/payment methods, and inspecting analytics or ingestion health. They should not need to know whether a workflow is internally implemented as entitlements, events, analytics, Durable Objects, or provider callbacks.
 
 ## Decision
 

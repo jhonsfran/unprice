@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -9,6 +8,7 @@ import { createServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../../subscriptions/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
@@ -63,46 +63,42 @@ function createCache(): Cache {
 
 function createServices() {
   const logger = createLogger()
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
+  const { payerBudgets } = createRecordedUsageFixture(db, {})
   const cache = createCache()
   const metrics = {} as Metrics
   const waitUntil = vi.fn()
   const services = createServiceContext({
-    reservationFlushGateway,
+    payerBudgets,
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
   })
 
-  return { analytics, reservationFlushGateway, cache, logger, metrics, services, waitUntil }
+  return { payerBudgets, cache, logger, metrics, services, waitUntil }
 }
 
 function createSubscriptionServiceWithWallet(input: {
   base: ServiceContext
   logger: Logger
-  analytics: Analytics
-  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
+  payerBudgets: ReturnType<typeof createRecordedUsageFixture>["payerBudgets"]
   cache: Cache
   metrics: Metrics
   waitUntil: (promise: Promise<unknown>) => void
   wallet: WalletService
 }) {
   return new SubscriptionService({
-    reservationFlushGateway: input.reservationFlushGateway,
+    invoicing: testInvoicing({ db, payerBudgets: input.payerBudgets }),
     db,
     repo: new DrizzleSubscriptionRepository(db),
     logger: input.logger,
-    analytics: input.analytics,
     waitUntil: input.waitUntil,
     cache: input.cache,
     metrics: input.metrics,
     customerService: input.base.customers,
     entitlementService: input.base.entitlements,
     billingService: input.base.billing,
-    ratingService: input.base.rating,
     ledgerService: input.base.ledger,
     walletService: input.wallet,
   })
@@ -272,14 +268,12 @@ describe("subscription renewal and wallet activation DB lifecycle", () => {
   })
 
   it("parks failed wallet activation in pending_activation and retries without duplicate credits", async () => {
-    const { analytics, reservationFlushGateway, cache, logger, metrics, services, waitUntil } =
-      createServices()
+    const { payerBudgets, cache, logger, metrics, services, waitUntil } = createServices()
     const failingWallet = walletWithFirstAdjustFailure(services.wallet)
     const subscriptions = createSubscriptionServiceWithWallet({
-      reservationFlushGateway,
+      payerBudgets,
       base: services,
       logger,
-      analytics,
       cache,
       metrics,
       waitUntil,

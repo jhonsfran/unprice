@@ -4,17 +4,16 @@ import type { ColumnDef } from "@tanstack/react-table"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import { Checkbox } from "@unprice/ui/checkbox"
 import type { FilterDataTableFilter, FilterDataTableOption } from "@unprice/ui/filter-data-table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
-import { CheckCircle2, FileSearch, Loader2, RotateCcw } from "lucide-react"
+import { FileSearch } from "lucide-react"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
 
-export type IngestionStatus = RouterOutputs["analytics"]["getIngestionStatus"]
+export type IngestionStatus = RouterOutputs["analytics"]["listIngestionEvents"]
 export type IngestionEventRow = IngestionStatus["recentEvents"][number]
 
-const statusOptions = [
+const statusOptions: { label: string; value: IngestionEventRow["state"] }[] = [
   {
     label: "Processed",
     value: "processed",
@@ -23,47 +22,18 @@ const statusOptions = [
     label: "Rejected",
     value: "rejected",
   },
-  {
-    label: "Failed",
-    value: "failed",
-  },
 ]
 
 const sourceTypeOptions = [
   {
-    label: "API key",
-    value: "api_key",
+    label: "Record",
+    value: "record",
   },
   {
-    label: "System",
-    value: "system",
-  },
-  {
-    label: "Unknown",
-    value: "unknown",
+    label: "Charge",
+    value: "charge",
   },
 ]
-
-const ingestionModeOptions = [
-  {
-    label: "Budgeted run",
-    value: "run",
-  },
-  {
-    label: "Sync",
-    value: "sync",
-  },
-  {
-    label: "Async",
-    value: "async",
-  },
-  {
-    label: "Unknown",
-    value: "unknown",
-  },
-] as const
-
-type IngestionEventMode = (typeof ingestionModeOptions)[number]["value"]
 
 export type IngestionEventsFilterId =
   | "state"
@@ -80,103 +50,19 @@ export type IngestionEventsFilterValues = {
   customerIds: string[]
 }
 
-function statusBadgeVariant(
-  state: IngestionEventRow["state"]
-): "success" | "warning" | "destructive" {
+function statusBadgeVariant(state: IngestionEventRow["state"]): "success" | "warning" {
   if (state === "processed") {
     return "success"
   }
 
-  return state === "failed" ? "destructive" : "warning"
-}
-
-export function getIngestionEventMode(row: IngestionEventRow): IngestionEventMode {
-  if (row.runId) {
-    return "run"
-  }
-
-  return row.ingestionMode ?? "unknown"
-}
-
-export function formatIngestionEventModeLabel(row: IngestionEventRow): string {
-  const mode = getIngestionEventMode(row)
-  return ingestionModeOptions.find((option) => option.value === mode)?.label ?? mode
-}
-
-function isReplayableFailedRow(
-  row: IngestionEventRow,
-  queuedReplayIds: ReadonlySet<string>
-): boolean {
-  return row.state === "failed" && row.replayable && !queuedReplayIds.has(row.canonicalAuditId)
-}
-
-function isReplayBlockedFailedRow(row: IngestionEventRow, replayIds: ReadonlySet<string>): boolean {
-  return row.state === "failed" && row.replayable && replayIds.has(row.canonicalAuditId)
+  return "warning"
 }
 
 export function buildIngestionEventsColumns(params: {
   workspaceSlug: string
   projectSlug: string
   onViewDetails: (event: IngestionEventRow) => void
-  onReplay: (canonicalAuditId: string) => Promise<void>
-  queuedReplayIds: ReadonlySet<string>
-  pendingReplayIds: ReadonlySet<string>
-  blockedReplayIds: ReadonlySet<string>
-  isReplayPending: boolean
-  hasReplayableRows: boolean
 }): ColumnDef<IngestionEventRow>[] {
-  const selectionColumn: ColumnDef<IngestionEventRow> = {
-    id: "select",
-    size: 44,
-    header: ({ table }) => {
-      const replayableRows = table
-        .getFilteredRowModel()
-        .rows.filter((row) => isReplayableFailedRow(row.original, params.blockedReplayIds))
-      const hasReplayableRows = replayableRows.length > 0
-      const selectedReplayableRows = replayableRows.filter((row) => row.getIsSelected())
-      const checked =
-        hasReplayableRows && selectedReplayableRows.length === replayableRows.length
-          ? true
-          : selectedReplayableRows.length > 0
-            ? "indeterminate"
-            : false
-
-      return (
-        <div className="flex w-full items-center justify-center">
-          <Checkbox
-            checked={checked}
-            disabled={!hasReplayableRows}
-            onCheckedChange={(value) => {
-              for (const row of replayableRows) {
-                row.toggleSelected(!!value)
-              }
-            }}
-            aria-label="Select replayable failed events"
-            className="translate-y-[2px]"
-          />
-        </div>
-      )
-    },
-    cell: ({ row }) => {
-      const canReplay = isReplayableFailedRow(row.original, params.blockedReplayIds)
-
-      if (!canReplay) {
-        return null
-      }
-
-      return (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label="Select replayable failed event"
-          className="translate-y-[2px]"
-        />
-      )
-    },
-    enableSorting: false,
-    enableHiding: false,
-  }
-
   const columns: ColumnDef<IngestionEventRow>[] = [
     {
       accessorKey: "handledAt",
@@ -211,17 +97,6 @@ export function buildIngestionEventsColumns(params: {
       size: 220,
     },
     {
-      id: "ingestionMode",
-      accessorFn: (row) => getIngestionEventMode(row),
-      header: "Ingestion mode",
-      cell: ({ row }) => (
-        <Badge variant={getIngestionEventMode(row.original) === "run" ? "secondary" : "outline"}>
-          {formatIngestionEventModeLabel(row.original)}
-        </Badge>
-      ),
-      size: 160,
-    },
-    {
       accessorKey: "customerId",
       header: "Customer",
       cell: ({ row }) => (
@@ -240,12 +115,8 @@ export function buildIngestionEventsColumns(params: {
     },
     {
       accessorKey: "sourceType",
-      header: "Source",
+      header: "Operation",
       cell: ({ row }) => {
-        const isReplayQueued = isReplayBlockedFailedRow(row.original, params.queuedReplayIds)
-        const isReplayPending = isReplayBlockedFailedRow(row.original, params.pendingReplayIds)
-        const canReplay = isReplayableFailedRow(row.original, params.blockedReplayIds)
-
         return (
           <div className="flex items-center gap-2">
             <Badge variant="outline">{row.original.sourceType}</Badge>
@@ -264,51 +135,6 @@ export function buildIngestionEventsColumns(params: {
                 </TooltipTrigger>
                 <TooltipContent>View details</TooltipContent>
               </Tooltip>
-              {canReplay ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="xs"
-                      aria-label="Replay failed event"
-                      disabled={params.isReplayPending}
-                      onClick={() => {
-                        void params.onReplay(row.original.canonicalAuditId).catch(() => undefined)
-                      }}
-                    >
-                      <RotateCcw className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Replay failed event</TooltipContent>
-                </Tooltip>
-              ) : isReplayPending ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      aria-label="Replay is being queued"
-                      disabled
-                      className="text-muted-foreground"
-                    >
-                      <Loader2 className="size-3.5 animate-spin" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Replay is being queued</TooltipContent>
-                </Tooltip>
-              ) : isReplayQueued ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="secondary" className="gap-1 font-normal">
-                      <CheckCircle2 className="size-3" />
-                      queued
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>Replay already queued from this browser</TooltipContent>
-                </Tooltip>
-              ) : null}
             </div>
           </div>
         )
@@ -317,10 +143,10 @@ export function buildIngestionEventsColumns(params: {
       size: 170,
     },
     {
-      accessorKey: "sourceId",
-      header: "Source ID",
+      accessorKey: "budgetKey",
+      header: "Budget key",
       cell: ({ row }) => (
-        <span className="whitespace-nowrap font-mono text-xs">{row.original.sourceId}</span>
+        <span className="whitespace-nowrap font-mono text-xs">{row.original.budgetKey}</span>
       ),
       size: 180,
     },
@@ -345,7 +171,7 @@ export function buildIngestionEventsColumns(params: {
     },
   ]
 
-  return params.hasReplayableRows ? [selectionColumn, ...columns] : columns
+  return columns
 }
 
 export function buildIngestionEventsFilters({
@@ -353,7 +179,7 @@ export function buildIngestionEventsFilters({
   values,
   onChange,
 }: {
-  facets: IngestionStatus["facets"] | undefined
+  facets: RouterOutputs["analytics"]["getIngestionSummary"]["facets"] | undefined
   values: IngestionEventsFilterValues
   onChange: (id: IngestionEventsFilterId, values: string[]) => void
 }): FilterDataTableFilter[] {
@@ -370,7 +196,7 @@ export function buildIngestionEventsFilters({
       onChange: (nextValues) => onChange("state", nextValues),
       options: statusOptions.map((option) => ({
         ...option,
-        count: statusCounts.get(option.value as IngestionEventRow["state"]) ?? 0,
+        count: statusCounts.get(option.value) ?? 0,
       })),
     },
     {
@@ -387,10 +213,10 @@ export function buildIngestionEventsFilters({
     {
       type: "checkbox",
       id: "sourceType",
-      label: "Source",
+      label: "Operation",
       showCounts: true,
       hideEmptyOptions: true,
-      emptyOptionsLabel: "No sources for the selected filters",
+      emptyOptionsLabel: "No operations for the selected filters",
       value: values.sourceTypes,
       onChange: (nextValues) => onChange("sourceType", nextValues),
       options: toFacetOptions(facets?.sourceTypes, values.sourceTypes, formatSourceTypeLabel),

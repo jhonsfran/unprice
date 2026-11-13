@@ -66,12 +66,7 @@ beforeEach(() => {
           usage: 1_400,
           usagePercent: null,
           quotaWindow: null,
-          spending: {
-            currency: "USD",
-            displayAmount: "$3.25",
-            ledgerAmount: 325_000_000,
-            scale: 8,
-          },
+          spending: { unit: "money:USD", amount: "3.25" },
         },
       ],
     },
@@ -98,7 +93,7 @@ describe("getCurrentEntitlementsV1 route", () => {
     )
     expect(useCaseMocks.getCustomerCurrentEntitlements).toHaveBeenCalledWith(
       expect.objectContaining({
-        entitlementWindowClient: expect.any(Object),
+        budgets: expect.any(Object),
         entitlements: expect.any(Object),
       }),
       { customerId: "cus_123", projectId: "proj_123" }
@@ -167,7 +162,7 @@ function createTestApp() {
     app,
     env: {
       APP_ENV: "development",
-      entitlementwindow: {},
+      budget: {},
     },
     executionCtx: {
       passThroughOnException: vi.fn(),

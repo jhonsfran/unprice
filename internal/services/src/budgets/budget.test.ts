@@ -1,4 +1,4 @@
-import { upsertBudgetInputSchema } from "@unprice/db/validators"
+import { upsertBudgetInputSchema, upsertBudgetInternalInputSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import * as fc from "fast-check"
 import { describe, expect, it } from "vitest"
@@ -10,6 +10,7 @@ import {
   CLOSED_BUDGET_RETENTION_MS,
   type HoldOperation,
   type LeaseOperation,
+  type Usage,
   checkTransition,
   consume,
   emptyLedger,
@@ -31,7 +32,7 @@ const $ = (units: number) => BigInt(units) * BigInt(100_000_000)
 const month100: BudgetConfigInput = { limits: [{ id: "month", amount: "100", window: "month" }] }
 
 const wire = (input: BudgetConfigInput) =>
-  upsertBudgetInputSchema.safeParse({ key: "customer:acme", unit: "USD", ...input })
+  upsertBudgetInternalInputSchema.safeParse({ key: "customer:acme", unit: "USD", ...input })
 
 function config(input: BudgetConfigInput) {
   const parsed = wire(input)
@@ -56,27 +57,32 @@ function upsert(input: BudgetConfigInput, unit = "money:USD", mayLoosen = true):
   }
 }
 
-function authorize(key: string, units: number, ttlMs?: number): BudgetCommand {
-  return { type: "authorize", idempotencyKey: key, amount: $(units), ttlMs }
+/** Usage of the amount alone, in whole units. */
+const usd = (units: number): Usage => ({ amount: $(units), quantities: {} })
+
+function authorize(key: string, units: number | Usage, ttlMs?: number): BudgetCommand {
+  const usage = typeof units === "number" ? usd(units) : units
+  return { type: "authorize", idempotencyKey: key, usage, ttlMs }
 }
 
 function oneShot(
   type: "charge" | "record",
   key: string,
-  amount: bigint,
+  usage: Usage,
   occurredAt = t0
 ): BudgetCommand {
-  if (type === "charge") return { type, idempotencyKey: key, amount }
-  return { type, idempotencyKey: key, amount, occurredAt }
+  if (type === "charge") return { type, idempotencyKey: key, usage }
+  return { type, idempotencyKey: key, usage, occurredAt }
 }
 
-const charge = (key: string, units: number) => oneShot("charge", key, $(units))
-const record = (key: string, units: number, occurredAt = t0) =>
-  oneShot("record", key, $(units), occurredAt)
-const settle = (holdId: string, units: number): BudgetCommand => ({
+const charge = (key: string, units: number | Usage) =>
+  oneShot("charge", key, typeof units === "number" ? usd(units) : units)
+const record = (key: string, units: number | Usage, occurredAt = t0) =>
+  oneShot("record", key, typeof units === "number" ? usd(units) : units, occurredAt)
+const settle = (holdId: string, units: number | Usage): BudgetCommand => ({
   type: "settle",
   holdId,
-  amount: $(units),
+  actual: typeof units === "number" ? usd(units) : units,
 })
 const release = (holdId: string): BudgetCommand => ({ type: "release", holdId })
 const lease = (leaseKey: string, units: number, ttlMs = minute): BudgetCommand => ({
@@ -144,10 +150,10 @@ describe("authorize and settle", () => {
     expect(held.outcome).toMatchObject({
       type: "authorize",
       holdId: "h_1",
-      amount: $(80),
+      reserved: usd(80),
       expiresAt: t0 + 15 * minute,
       replayed: false,
-      balance: { remaining: $(20), held: $(80) },
+      balance: { remaining: $(20), held: usd(80) },
     })
     // The alarm comes back at the hold's expiry to settle it if the caller never does.
     expect(held.wakeAt).toBe(t0 + 15 * minute)
@@ -157,11 +163,11 @@ describe("authorize and settle", () => {
       state: {
         status: "settled",
         closedAt: t0 + minute,
-        actual: $(55),
+        actual: usd(55),
         crossed: [],
       },
     })
-    expect(settled.outcome).toMatchObject({ released: $(25), expired: false, replayed: false })
+    expect(settled.outcome).toMatchObject({ released: usd(25), expired: false, replayed: false })
     expect(remaining(settled)).toEqual([["month", $(45)]])
     expect(settled.wakeAt).toBe(t0 + minute + day)
   })
@@ -173,17 +179,18 @@ describe("authorize and settle", () => {
     expect(rejection(store.run(settle("h_1", 130), t0))).toEqual({
       code: "HOLD_AMOUNT_EXCEEDED",
       holdId: "h_1",
+      measure: { type: "amount" },
       maximum: $(80),
       actual: $(130),
     })
     expect([store.writes, store.ledger.held, store.ledger.usage.never.consumed]).toEqual([
       writes,
-      $(80),
-      $(0),
+      usd(80),
+      usd(0),
     ])
     expect(ok(store.run(settle("h_1", 80), t0)).outcome).toMatchObject({
-      actual: $(80),
-      released: $(0),
+      actual: usd(80),
+      released: usd(0),
       balance: { remaining: $(20) },
     })
   })
@@ -206,7 +213,7 @@ describe("denials", () => {
         remedy: "release_holds",
       },
     })
-    expect([store.writes, store.ledger.held]).toEqual([writes, $(60)])
+    expect([store.writes, store.ledger.held]).toEqual([writes, usd(60)])
 
     ok(store.run(release("h_1"), t0))
     expect(ok(store.run(authorize("k2", 60), t0)).outcome).toMatchObject({ holdId: "h_2" })
@@ -307,10 +314,10 @@ describe("several windows at once", () => {
     const ended = (windowId: string) =>
       read.history.filter((p) => p.windowId === windowId).map((p) => [p.start, p.consumed])
     expect(ended("week")).toEqual([
-      [at("2026-10-19T00:00:00Z"), $(20)],
-      [at("2026-10-12T00:00:00Z"), $(19)],
+      [at("2026-10-19T00:00:00Z"), usd(20)],
+      [at("2026-10-12T00:00:00Z"), usd(19)],
     ])
-    expect(ended("month")).toEqual([[at("2026-10-01T00:00:00Z"), $(49)]])
+    expect(ended("month")).toEqual([[at("2026-10-01T00:00:00Z"), usd(49)]])
     // Ten hours had usage; each rolled into history on the next accepted charge.
     expect(ended("hour")).toHaveLength(10)
   })
@@ -357,7 +364,7 @@ describe("idempotency", () => {
       false,
       {
         type: "charge",
-        amount: $(60),
+        usage: usd(60),
         crossed: ["alert"],
         replayed: true,
         balance: { remaining: $(40) },
@@ -379,7 +386,7 @@ describe("idempotency", () => {
     const replay = ok(store.run(settle("h_1", 55), t0))
     expect([replay.write, replay.outcome]).toMatchObject([
       false,
-      { actual: $(55), released: $(25), replayed: true },
+      { actual: usd(55), released: usd(25), replayed: true },
     ])
     expect(rejection(store.run(settle("h_1", 56), t0))).toEqual({
       code: "HOLD_CLOSED",
@@ -392,11 +399,11 @@ describe("idempotency", () => {
     })
 
     expect(ok(store.run(release("h_2"), t0)).outcome).toMatchObject({
-      released: $(10),
+      released: usd(10),
       replayed: false,
     })
     expect(ok(store.run(release("h_2"), t0)).outcome).toMatchObject({
-      released: $(10),
+      released: usd(10),
       replayed: true,
     })
     expect(rejection(store.run(settle("h_2", 1), t0))).toMatchObject({
@@ -428,8 +435,8 @@ describe("expiry and final settlement", () => {
     expect([read.write, remaining(read)]).toEqual([false, [["month", $(20)]]])
 
     expect(ok(store.run(settle("h_1", 50), t0 + 2 * minute)).outcome).toMatchObject({
-      actual: $(50),
-      released: $(30),
+      actual: usd(50),
+      released: usd(30),
       expired: true,
     })
   })
@@ -442,16 +449,22 @@ describe("expiry and final settlement", () => {
     store.alarm(expiredAt)
 
     expect(store.rows.get("h_1")).toMatchObject({
-      state: { status: "settled", closedAt: expiredAt, actual: $(80), crossed: [], byExpiry: true },
+      state: {
+        status: "settled",
+        closedAt: expiredAt,
+        actual: usd(80),
+        crossed: [],
+        byExpiry: true,
+      },
     })
     expect(store.rows.get("h_2")).toMatchObject({ state: { status: "open" } })
-    expect([store.ledger.held, store.ledger.usage.day.consumed]).toEqual([$(10), $(80)])
+    expect([store.ledger.held, store.ledger.usage.day.consumed]).toEqual([usd(10), usd(80)])
     expect(rejection(store.run(charge("other", 11), expiredAt)).code).toBe("LIMIT_EXCEEDED")
 
     // A late settle of the full amount replays; anything else learns the hold expired.
     expect(ok(store.run(settle("h_1", 80), expiredAt)).outcome).toMatchObject({
-      actual: $(80),
-      released: $(0),
+      actual: usd(80),
+      released: usd(0),
       expired: true,
       replayed: true,
     })
@@ -480,7 +493,7 @@ describe("expiry and final settlement", () => {
         {
           status: "settled",
           closedAt: t0 + 3 * minute,
-          actual: $(40),
+          actual: usd(40),
           crossed: [],
           byExpiry: true,
         },
@@ -490,13 +503,13 @@ describe("expiry and final settlement", () => {
         {
           status: "settled",
           closedAt: t0 + 3 * minute,
-          actual: $(30),
+          actual: usd(30),
           crossed: ["soft"],
           byExpiry: true,
         },
       ],
     ])
-    expect([swept.ledger.held, swept.ledger.usage.month.consumed]).toEqual([$(0), $(70)])
+    expect([swept.ledger.held, swept.ledger.usage.month.consumed]).toEqual([usd(0), usd(70)])
     expect(swept.wakeAt).toBe(t0 + 3 * minute + day)
   })
 
@@ -504,14 +517,14 @@ describe("expiry and final settlement", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 80, minute), t0))
     expect(ok(store.run(record("e1", 30), t0 + minute)).outcome).toMatchObject({
-      amount: $(30),
+      usage: usd(30),
       crossed: [],
       replayed: false,
-      balance: { remaining: -$(10), held: $(80) },
+      balance: { remaining: -$(10), held: usd(80) },
     })
     expect(ok(store.run(settle("h_1", 70), t0 + minute)).outcome).toMatchObject({
       crossed: [],
-      balance: { remaining: $(0), held: $(0) },
+      balance: { remaining: $(0), held: usd(0) },
     })
     expect(ok(store.run(record("e2", 5), t0 + minute)).outcome).toMatchObject({
       crossed: ["month"],
@@ -555,9 +568,9 @@ describe("expiry and final settlement", () => {
       code: "HOLD_RETIRED",
       holdId: "h_1",
     })
-    expect(ok(store.run(release("h_2"), purgedAt)).outcome).toMatchObject({ released: $(5) })
+    expect(ok(store.run(release("h_2"), purgedAt)).outcome).toMatchObject({ released: usd(5) })
     expect(rejection(store.run(settle("h_3", 1), purgedAt)).code).toBe("HOLD_NOT_FOUND")
-    expect(store.ledger.usage.never.consumed).toBe($(25))
+    expect(store.ledger.usage.never.consumed).toEqual(usd(25))
   })
 })
 
@@ -581,7 +594,7 @@ describe("leases", () => {
       },
       terms,
       replayed: false,
-      balance: { remaining: $(0), held: $(30) },
+      balance: { remaining: $(0), held: usd(30) },
     })
     expect(granted.wakeAt).toBe(t0 + minute)
 
@@ -612,7 +625,7 @@ describe("leases", () => {
     expect(refused.rejection).toEqual({
       code: "LIMIT_EXCEEDED",
       blocked,
-      balance: expect.objectContaining({ remaining: $(0), held: $(100) }),
+      balance: expect.objectContaining({ remaining: $(0), held: usd(100) }),
     })
     expect([refused.write, refused.wakeAt]).toEqual([true, t0 + 10 * minute])
     expect(store.rows.get("l:l1")).toMatchObject({
@@ -626,7 +639,7 @@ describe("leases", () => {
     const replayed = refusal(store.run(lease("l1", 1), t0 + 10 * minute - 1))
     expect([replayed.write, replayed.rejection]).toMatchObject([
       false,
-      { code: "LIMIT_EXCEEDED", blocked, balance: { remaining: $(100), held: $(0) } },
+      { code: "LIMIT_EXCEEDED", blocked, balance: { remaining: $(100), held: usd(0) } },
     ])
     expect(rejection(store.run(lease("l1", 2), t0))).toEqual({
       code: "IDEMPOTENCY_CONFLICT",
@@ -637,7 +650,7 @@ describe("leases", () => {
       leaseKey: "l1",
     })
     expect(store.writes).toBe(writes)
-    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([$(0), $(0)])
+    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([usd(0), usd(0)])
     expect(store.ledger.operations).toMatchObject({ authorize: 1, release: 1, lease: 0 })
 
     const regranted = ok(store.run(lease("l1", 1), t0 + 10 * minute))
@@ -673,18 +686,18 @@ describe("leases", () => {
       released: $(0),
       crossed: [],
       replayed: false,
-      balance: { remaining: $(60), held: $(30) },
+      balance: { remaining: $(60), held: usd(30) },
     })
-    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([$(30), $(10)])
+    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([usd(30), usd(10)])
 
     const second = ok(store.run(report("l1", 2, 25, 20), t0 + 3 * minute))
     expect(second.outcome).toMatchObject({
       lease: { seq: 2, granted: $(60), captured: $(25), expiresAt: t0 + 7 * minute },
       extension: { requested: $(20), granted: $(20), denied: null },
-      balance: { remaining: $(40), held: $(35) },
+      balance: { remaining: $(40), held: usd(35) },
     })
     expect(second.wakeAt).toBe(t0 + 7 * minute)
-    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([$(35), $(25)])
+    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([usd(35), usd(25)])
   })
 
   it("extends short near a limit or after close and still applies the capture", () => {
@@ -705,7 +718,7 @@ describe("leases", () => {
         granted: $(10),
         denied: { code: "LIMIT_EXCEEDED", blocked: { ...blocked, remaining: $(10), held: $(10) } },
       },
-      balance: { remaining: $(0), held: $(20) },
+      balance: { remaining: $(0), held: usd(20) },
     })
     expect(ok(store.run(report("l1", 2, 35, 5), t0)).outcome).toMatchObject({
       lease: { granted: $(50), captured: $(35) },
@@ -715,7 +728,7 @@ describe("leases", () => {
         denied: { code: "LIMIT_EXCEEDED", blocked: { ...blocked, remaining: $(0), held: $(15) } },
       },
     })
-    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([$(15), $(85)])
+    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([usd(15), usd(85)])
 
     const closing = budgetWith({ ...month100, closesAt: t0 + hour })
     ok(closing.run(lease("l1", 10, 2 * hour), t0))
@@ -785,7 +798,7 @@ describe("leases", () => {
       extension: { requested: $(0), granted: $(0), denied: null },
       released: $(15),
       replayed: false,
-      balance: { remaining: $(75), held: $(0) },
+      balance: { remaining: $(75), held: usd(0) },
     })
     expect(closed.wakeAt).toBe(t0 + 1_000 + day)
     expect(ok(store.run(finalReport("l1", 2, 25), t0 + 2_000)).outcome).toMatchObject({
@@ -812,7 +825,7 @@ describe("leases", () => {
     expect(ok(store.run(finalReport("l1", 1, 10), late)).outcome).toMatchObject({
       lease: { captured: $(10), status: "closed" },
       released: $(30),
-      balance: { remaining: $(90), held: $(0) },
+      balance: { remaining: $(90), held: usd(0) },
     })
   })
 
@@ -828,7 +841,7 @@ describe("leases", () => {
       captured: $(40),
       state: { status: "expired", closedAt: expiredAt },
     })
-    expect([store.ledger.held, store.ledger.usage.day.consumed]).toEqual([$(0), $(40)])
+    expect([store.ledger.held, store.ledger.usage.day.consumed]).toEqual([usd(0), usd(40)])
     expect(rejection(store.run(charge("other", 61), expiredAt)).code).toBe("LIMIT_EXCEEDED")
     expect(rejection(store.run(finalReport("l1", 2, 20), expiredAt))).toEqual({
       code: "LEASE_CLOSED",
@@ -1138,18 +1151,18 @@ describe("closesAt", () => {
       replayed: true,
     })
     expect(ok(store.run(settle("h_1", 25), closesAt)).outcome).toMatchObject({
-      actual: $(25),
-      released: $(5),
+      actual: usd(25),
+      released: usd(5),
       replayed: false,
     })
-    expect(ok(store.run(release("h_2"), closesAt)).outcome).toMatchObject({ released: $(10) })
+    expect(ok(store.run(release("h_2"), closesAt)).outcome).toMatchObject({ released: usd(10) })
     expect(ok(store.run(record("r1", 5, closesAt), closesAt + day - 1)).outcome).toMatchObject({
       replayed: false,
     })
     expect(rejection(store.run(record("r2", 5, closesAt), closesAt + day))).toEqual(closed)
 
     expect(ok(store.run({ type: "get" }, closesAt + day)).outcome).toMatchObject({
-      budget: { closesAt, closed: true, balance: { held: $(0), limits: [{ consumed: $(30) }] } },
+      budget: { closesAt, closed: true, balance: { held: usd(0), limits: [{ consumed: $(30) }] } },
     })
 
     const reopened = ok(store.run(upsert({ ...month100, closesAt: null }), closesAt + day))
@@ -1251,9 +1264,9 @@ describe("window history", () => {
 
     const read = ok(store.run({ type: "get" }, t0 + 3 * day))
     // The hour counter rolls too, but no limit uses it, so it keeps no history.
-    expect(read.periods).toEqual([{ windowId: "day", start: oct14, end: oct15, consumed: $(20) }])
+    expect(read.periods).toEqual([{ windowId: "day", start: oct14, end: oct15, consumed: usd(20) }])
     expect(read.outcome).toMatchObject({
-      history: [{ windowId: "day", start: oct14, end: oct15, consumed: $(20) }],
+      history: [{ windowId: "day", start: oct14, end: oct15, consumed: usd(20) }],
       budget: { balance: { limits: [{ consumed: $(0), remaining: $(50) }] } },
     })
     expect(ok(store.run({ type: "get" }, t0 + 3 * day)).write).toBe(false)
@@ -1266,7 +1279,7 @@ describe("window history", () => {
     const read = ok(store.run({ type: "get" }, t0 + 14 * day)).outcome
     if (read.type !== "get") throw new Error("expected get")
     expect(read.history.map((period) => [period.start, period.consumed])).toEqual(
-      Array.from({ length: 12 }, (_, i) => [oct14 + (13 - i) * day, $(14 - i)])
+      Array.from({ length: 12 }, (_, i) => [oct14 + (13 - i) * day, usd(14 - i)])
     )
     expect([store.history.get("day")?.length, store.history.has("hour")]).toEqual([12, false])
   })
@@ -1314,7 +1327,7 @@ describe("record dedupe", () => {
     expect([...store.rows.keys()]).toEqual(["o:r1", "o:r2"])
     expect(ok(store.run(record("r2", 70), late)).outcome).toMatchObject({
       type: "record",
-      amount: $(70),
+      usage: usd(70),
       crossed: [],
       replayed: true,
       balance: { remaining: $(0) },
@@ -1332,8 +1345,8 @@ describe("record dedupe", () => {
     ok(store.run(record("r1", 30), t0))
 
     const reused = ok(store.run(record("r1", 5, t0 + 25 * hour), t0 + 25 * hour))
-    expect(reused.outcome).toMatchObject({ amount: $(5), replayed: false })
-    expect([store.rows.size, store.rows.get("o:r1")]).toMatchObject([1, { amount: $(5) }])
+    expect(reused.outcome).toMatchObject({ usage: usd(5), replayed: false })
+    expect([store.rows.size, store.rows.get("o:r1")]).toMatchObject([1, { usage: usd(5) }])
   })
 })
 
@@ -1350,7 +1363,12 @@ describe("amounts and crossings", () => {
       )
     )
 
-    const charged = ok(store.run(oneShot("charge", "c1", BigInt("3000000000000000001")), t0))
+    const charged = ok(
+      store.run(
+        oneShot("charge", "c1", { amount: BigInt("3000000000000000001"), quantities: {} }),
+        t0
+      )
+    )
     expect(remaining(charged)).toEqual([["tokens", BigInt("1999999999999999999")]])
     expect(formatAmount(BigInt("1999999999999999999"))).toBe("19999999999.99999999")
   })
@@ -1381,9 +1399,203 @@ describe("amounts and crossings", () => {
       maxTtlMs: hour,
     })
     expect(rejection(store.run(authorize("k2", 1, hour + 1), t0)).code).toBe("INVALID_TTL")
-    expect(() => store.run(oneShot("record", "r1", BigInt(-1)), t0)).toThrow(
-      "budget transition breaks invariants"
-    )
+    expect(() =>
+      store.run(oneShot("record", "r1", { amount: BigInt(-1), quantities: {} }), t0)
+    ).toThrow("budget transition breaks invariants")
+  })
+})
+
+describe("quantity limits", () => {
+  // $100 a month and 50 images a day, in one budget.
+  const metered: BudgetConfigInput = {
+    limits: [
+      { amount: "100", window: "month" },
+      { feature: "images", amount: "50", window: "day" },
+    ],
+  }
+  const oct14 = Date.parse("2026-10-14T00:00:00.000Z")
+  /** `n` images costing `dollars`. */
+  const images = (n: number, dollars: number): Usage => ({
+    amount: $(dollars),
+    quantities: { images: $(n) },
+  })
+
+  it("blocks the 51st image on the daily image limit while the month has money left", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(50, 10)), t0))
+
+    expect(rejection(store.run(authorize("k1", images(1, 1)), t0))).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: {
+        limitId: "images:day",
+        window: "day",
+        remaining: $(0),
+        held: $(0),
+        resetsAt: oct15,
+        remedy: "wait_for_reset",
+      },
+      balance: { remaining: $(90) },
+    })
+    expect(ok(store.run(authorize("k2", usd(1)), t0)).outcome).toMatchObject({ holdId: "h_1" })
+  })
+
+  it("settles below a hold and returns the rest of every measure", () => {
+    const store = budgetWith(metered)
+    ok(store.run(authorize("k1", images(10, 8)), t0))
+
+    const settled = ok(store.run(settle("h_1", images(4, 5)), t0))
+    expect(settled.outcome).toMatchObject({
+      actual: { amount: $(5), quantities: { images: $(4) } },
+      released: { amount: $(3), quantities: { images: $(6) } },
+    })
+    expect(remaining(settled)).toEqual([
+      ["month", $(95)],
+      ["images:day", $(46)],
+    ])
+    expect([store.ledger.held, store.ledger.usage.day.consumed]).toEqual([
+      { amount: $(0), quantities: {} },
+      { amount: $(5), quantities: { images: $(4) } },
+    ])
+  })
+
+  it("refuses a settle above the hold on the quantity alone and names it", () => {
+    const store = budgetWith(metered)
+    ok(store.run(authorize("k1", images(10, 8)), t0))
+
+    const refused = store.run(settle("h_1", images(11, 5)), t0)
+    expect(rejection(refused)).toEqual({
+      code: "HOLD_AMOUNT_EXCEEDED",
+      holdId: "h_1",
+      measure: { type: "quantity", feature: "images" },
+      maximum: $(10),
+      actual: $(11),
+    })
+    expect(refused.err?.message).toBe("Hold h_1 permits 10 of images, not 11")
+    expect(store.ledger.held).toEqual({ amount: $(8), quantities: { images: $(10) } })
+  })
+
+  it("counts a record past the image cap and reports the crossing", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(45, 1)), t0))
+
+    const recorded = ok(store.run(record("r1", images(10, 1)), t0))
+    expect(recorded.outcome).toMatchObject({ crossed: ["images:day"], replayed: false })
+    expect(remaining(recorded)).toEqual([
+      ["month", $(98)],
+      ["images:day", -$(5)],
+    ])
+    expect(rejection(store.run(charge("c2", images(1, 1)), t0))).toMatchObject({
+      blocked: { limitId: "images:day", remaining: -$(5), remedy: "wait_for_reset" },
+    })
+  })
+
+  it("rolls the day into history with the amount and the images", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(20, 3)), t0))
+
+    const read = ok(store.run({ type: "get" }, t0 + day))
+    expect(read.periods).toEqual([
+      {
+        windowId: "day",
+        start: oct14,
+        end: oct15,
+        consumed: { amount: $(3), quantities: { images: $(20) } },
+      },
+    ])
+  })
+
+  it("refuses to lower the image limit below what is consumed and held", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(30, 1)), t0))
+    ok(store.run(authorize("k1", images(10, 1)), t0))
+
+    const lowered = upsert({
+      limits: [
+        { amount: "100", window: "month" },
+        { feature: "images", amount: "35", window: "day" },
+      ],
+    })
+    expect(rejection(store.run(lowered, t0))).toEqual({
+      code: "LIMIT_BELOW_USAGE",
+      limitId: "images:day",
+      minimum: $(40),
+      requested: $(35),
+    })
+  })
+
+  it("keeps a limit's measure under its id", () => {
+    const store = budgetWith(metered)
+    const moved = upsert({
+      limits: [{ id: "month", feature: "images", amount: "100", window: "month" }],
+    })
+    expect(rejection(store.run(moved, t0))).toEqual({
+      code: "LIMIT_MEASURE_IMMUTABLE",
+      limitId: "month",
+      current: { type: "amount" },
+      requested: { type: "quantity", feature: "images" },
+    })
+  })
+
+  it("gates only requests that carry the feature of a quantity limit past its cap", () => {
+    const store = budgetWith(metered)
+    ok(store.run(record("r1", images(60, 10)), t0))
+
+    const tokens = (n: number, dollars: number): Usage => ({
+      amount: $(dollars),
+      quantities: { tokens: $(n) },
+    })
+    expect(ok(store.run(authorize("k1", usd(5)), t0)).outcome).toMatchObject({ holdId: "h_1" })
+    expect(ok(store.run(authorize("k2", tokens(1000, 5)), t0)).outcome).toMatchObject({
+      holdId: "h_2",
+    })
+    expect(rejection(store.run(authorize("k3", images(1, 1)), t0))).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: { limitId: "images:day", remaining: -$(10), remedy: "wait_for_reset" },
+    })
+  })
+
+  it("leaves leases to the amount limits", () => {
+    const store = budgetWith(metered)
+    ok(store.run(record("r1", images(60, 10)), t0))
+
+    expect(ok(store.run(lease("l1", 20), t0)).outcome).toMatchObject({
+      lease: { granted: $(20), status: "open" },
+      balance: { remaining: $(70) },
+    })
+  })
+
+  it("parses a feature into the limit's measure, and the public schema drops it", () => {
+    const parsed = config(metered)
+    expect(parsed.limits).toEqual([
+      {
+        id: "month",
+        amount: $(100),
+        window: "month",
+        enforce: "hard",
+        measure: { type: "amount" },
+      },
+      {
+        id: "images:day",
+        amount: $(50),
+        window: "day",
+        enforce: "hard",
+        measure: { type: "quantity", feature: "images" },
+      },
+    ])
+    expect(formatBudgetConfig(parsed).limits[1]).toEqual({
+      id: "images:day",
+      amount: "50",
+      window: "day",
+      enforce: "hard",
+      feature: "images",
+    })
+    expect(config(formatBudgetConfig(parsed))).toEqual(parsed)
+    const publicLimits = upsertBudgetInputSchema.parse({ key: "k", unit: "USD", ...metered }).config
+      .limits
+    expect(publicLimits.map((limit) => [limit.id, limit.measure])).toEqual([
+      ["month", { type: "amount" }],
+      ["day", { type: "amount" }],
+    ])
   })
 })
 
@@ -1399,13 +1611,20 @@ describe("config schema", () => {
     })
     expect(parsed).toEqual({
       limits: [
-        { id: "m", amount: BigInt(1_250_000_000), window: "month", enforce: "hard" },
+        {
+          id: "m",
+          amount: BigInt(1_250_000_000),
+          window: "month",
+          enforce: "hard",
+          measure: { type: "amount" },
+        },
         {
           id: "billing",
           amount: BigInt(100_000_000),
           window: "month",
           anchor: Date.parse("2026-10-15T07:30:00.000Z"),
           enforce: "hard",
+          measure: { type: "amount" },
         },
       ],
       holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
@@ -1489,7 +1708,7 @@ describe("checkTransition", () => {
       kind: "hold",
       id: "h_1",
       idempotencyKey: "k1",
-      amount: $(80),
+      reserved: usd(80),
       ttlMs: minute,
       createdAt: t0,
       expiresAt: t0 + minute,
@@ -1497,10 +1716,10 @@ describe("checkTransition", () => {
     }
     const settled: HoldOperation = {
       ...hold,
-      state: { status: "settled", closedAt: t0, actual: $(55), crossed: [] },
+      state: { status: "settled", closedAt: t0, actual: usd(55), crossed: [] },
     }
-    const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: $(80) }
-    const after = { ...before, held: $(25), usage: consume(before.usage, $(55)) }
+    const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: usd(80) }
+    const after = { ...before, held: usd(25), usage: consume(before.usage, usd(55)) }
     expect(
       checkTransition({
         before,
@@ -1510,7 +1729,7 @@ describe("checkTransition", () => {
         steps: [[hold, settled]],
         periods: [],
       })
-    ).toEqual(["ledger held moved -5500000000, rows say -8000000000"])
+    ).toEqual(["ledger held moved amount -5500000000, rows say amount -8000000000"])
   })
 
   it("catches a settle above its hold", () => {
@@ -1518,7 +1737,7 @@ describe("checkTransition", () => {
       kind: "hold",
       id: "h_1",
       idempotencyKey: "k1",
-      amount: $(80),
+      reserved: usd(80),
       ttlMs: minute,
       createdAt: t0,
       expiresAt: t0 + minute,
@@ -1526,10 +1745,10 @@ describe("checkTransition", () => {
     }
     const settled: HoldOperation = {
       ...hold,
-      state: { status: "settled", closedAt: t0, actual: $(90), crossed: [] },
+      state: { status: "settled", closedAt: t0, actual: usd(90), crossed: [] },
     }
-    const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: $(80) }
-    const after = { ...before, held: $(0), usage: consume(before.usage, $(90)) }
+    const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: usd(80) }
+    const after = { ...before, held: usd(0), usage: consume(before.usage, usd(90)) }
     expect(
       checkTransition({
         before,
@@ -1539,7 +1758,7 @@ describe("checkTransition", () => {
         steps: [[hold, settled]],
         periods: [],
       })
-    ).toEqual(["row h_1 settled 9000000000 of 8000000000"])
+    ).toEqual(["row h_1 settled amount 9000000000 of amount 8000000000"])
   })
 })
 
@@ -1563,8 +1782,8 @@ describe("checkTransition for leases", () => {
       captured: $(30),
       state: { status: "expired", closedAt: t0 + minute },
     }
-    const before = { ...emptyLedger, lastAt: t0, held: $(30) }
-    const after = { ...before, held: $(0), usage: consume(before.usage, $(20)) }
+    const before = { ...emptyLedger, lastAt: t0, held: usd(30) }
+    const after = { ...before, held: usd(0), usage: consume(before.usage, usd(20)) }
     expect(
       checkTransition({
         before,
@@ -1624,6 +1843,12 @@ describe("history does not slow the hot path", () => {
       target: null,
       history: [],
       expired: [],
+      cards: {},
+      staleCards: [],
+      reservationsOpen: false,
+      upsert: null,
+      statements: [],
+      funding: [],
     }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })
     if (first.err) throw first.err
@@ -1678,10 +1903,10 @@ describe("create on first use", () => {
     expect(held.outcome).toMatchObject({
       type: "authorize",
       holdId: "h_1",
-      amount: $(30),
+      reserved: usd(30),
       replayed: false,
       created: { key: "customer:acme", unit: "money:USD", version: 1, closed: false },
-      balance: { remaining: $(70), held: $(30) },
+      balance: { remaining: $(70), held: usd(30) },
     })
     expect(store.writes).toBe(1)
     expect(store.budget).toMatchObject({ key: "customer:acme", projectId: "proj_1", version: 1 })
@@ -1702,7 +1927,7 @@ describe("create on first use", () => {
     const charged = new MemoryBudgetStore()
     expect(ok(charged.run(withDefinition(charge("c1", 5), month100), t0)).outcome).toMatchObject({
       type: "charge",
-      amount: $(5),
+      usage: usd(5),
       created: { version: 1 },
       balance: { remaining: $(95) },
     })
@@ -1781,6 +2006,113 @@ describe("create on first use", () => {
         }
       ),
       { numRuns: 100 }
+    )
+  })
+})
+
+describe("unit change (ADR-0008 D1)", () => {
+  const metered: BudgetConfigInput = {
+    limits: [
+      { amount: "100", window: "month" },
+      { feature: "images", amount: "50", window: "day" },
+    ],
+  }
+  const images = (n: number, units: number): Usage => ({
+    amount: $(units),
+    quantities: { images: $(n) },
+  })
+  /** Billing's upsert: it sets pricing, so it may move the unit. */
+  const billing = (unit: string): BudgetCommand => {
+    const command = upsert(metered, unit)
+    if (command.type !== "upsert") throw new Error("not an upsert")
+    return { ...command, setsPricing: true }
+  }
+
+  it("moves money:USD to money:EUR, restarting amounts and keeping quantities", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(20, 30)), t0))
+
+    const moved = ok(store.run(billing("money:EUR"), t0))
+    expect(moved.outcome).toMatchObject({
+      changes: [{ change: "unit", from: "money:USD", to: "money:EUR" }],
+      budget: { unit: "money:EUR", version: 2 },
+    })
+    expect(remaining(moved)).toEqual([
+      ["month", $(100)],
+      ["images:day", $(30)],
+    ])
+    expect([store.ledger.usage.month.consumed, store.ledger.usage.day.consumed]).toEqual([
+      { amount: $(0), quantities: { images: $(20) } },
+      { amount: $(0), quantities: { images: $(20) } },
+    ])
+
+    // The next charge counts in EUR from zero; the day keeps its images.
+    const charged = ok(store.run(charge("c2", images(5, 7)), t0))
+    expect(remaining(charged)).toEqual([
+      ["month", $(93)],
+      ["images:day", $(25)],
+    ])
+  })
+
+  it("moves money to credits", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(2, 40)), t0))
+
+    const moved = ok(store.run(billing("credits:tokens"), t0))
+    expect(moved.outcome).toMatchObject({
+      changes: [{ change: "unit", from: "money:USD", to: "credits:tokens" }],
+      budget: { unit: "credits:tokens" },
+    })
+    expect(remaining(moved)).toEqual([
+      ["month", $(100)],
+      ["images:day", $(48)],
+    ])
+  })
+
+  it("refuses while a hold is open and writes nothing, then moves once it settles", () => {
+    const store = budgetWith(metered)
+    ok(store.run(authorize("k1", images(3, 10)), t0))
+    const writes = store.writes
+
+    expect(rejection(store.run(billing("money:EUR"), t0))).toEqual({ code: "RESERVATIONS_OPEN" })
+    expect(store.writes).toBe(writes)
+
+    ok(store.run(settle("h_1", images(3, 10)), t0))
+    expect(ok(store.run(billing("money:EUR"), t0)).outcome).toMatchObject({
+      budget: { unit: "money:EUR" },
+    })
+  })
+
+  it("keeps the unit immutable for a caller that does not set pricing", () => {
+    const store = budgetWith(metered)
+    expect(rejection(store.run(upsert(metered, "money:EUR"), t0))).toEqual({
+      code: "UNIT_IMMUTABLE",
+      current: "money:USD",
+      requested: "money:EUR",
+    })
+  })
+
+  it("flags a unit change that kept an amount or happened while holding", () => {
+    const before = {
+      ...emptyLedger,
+      held: usd(1),
+      usage: consume(emptyLedger.usage, images(2, 5)),
+    }
+    expect(
+      checkTransition({
+        before,
+        after: before,
+        limits: [],
+        resultingLimits: [],
+        steps: [],
+        periods: [],
+        unitChanged: true,
+      })
+    ).toEqual(
+      expect.arrayContaining([
+        `unit changed while holding amount ${$(1)}`,
+        `day counted amount ${$(5)}, images ${$(2)}, expected amount 0, images ${$(2)}`,
+      ])
     )
   })
 })

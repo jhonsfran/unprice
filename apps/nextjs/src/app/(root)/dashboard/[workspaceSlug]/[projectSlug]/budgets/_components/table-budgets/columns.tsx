@@ -7,7 +7,7 @@ import { CopyButton } from "~/components/copy-button"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
-import { formatBudgetAmount, formatUnit } from "../budget-format"
+import { formatLimitAmount, formatUnit } from "../budget-format"
 import { BudgetStatusBadge } from "../budget-status-badge"
 
 type BudgetRow = RouterOutputs["budgets"]["list"]["budgets"][number]
@@ -17,7 +17,7 @@ function formatLimits({ limits, unit }: Pick<BudgetRow, "limits" | "unit">): str
   return limits
     .map((limit) => {
       const window = limit.window === "never" ? "" : `/${limit.window}`
-      return `${formatBudgetAmount(limit.amount, unit)}${window} ${limit.enforce}`
+      return `${formatLimitAmount(limit.amount, limit, unit)}${window} ${limit.enforce}`
     })
     .join(" · ")
 }

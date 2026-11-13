@@ -2,47 +2,39 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@unprice/ui/badge"
-import { Button } from "@unprice/ui/button"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@unprice/ui/sheet"
 import { Skeleton } from "@unprice/ui/skeleton"
-import { CheckCircle2, Loader2, RotateCcw, TriangleAlert } from "lucide-react"
+import { TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
-import {
-  type IngestionEventRow,
-  formatIngestionEventModeLabel,
-} from "./ingestion-events-table-schema"
+import type { IngestionEventRow } from "./ingestion-events-table-schema"
 
 export function IngestionEventDetailsSheet({
   event,
-  isReplayQueued,
-  isReplayPending,
   onOpenChange,
-  onReplay,
   open,
 }: {
   event: IngestionEventRow | null
-  isReplayQueued: boolean
-  isReplayPending: boolean
   onOpenChange: (open: boolean) => void
-  onReplay: (canonicalAuditId: string) => Promise<void>
   open: boolean
 }) {
   const trpc = useTRPC()
-  const hasReplayPayload = event?.state === "failed" && event.replayable
-  const canReplay = hasReplayPayload && !isReplayQueued
+  // A refused event keeps its payload and rejection in the budget journal.
+  const hasRejectedPayload = event?.state === "rejected"
   const {
     data: payloadData,
     isLoading: isPayloadLoading,
     error: payloadError,
   } = useQuery(
-    trpc.analytics.getFailedIngestionEventPayload.queryOptions(
+    trpc.analytics.getRejectedEventPayload.queryOptions(
       {
-        canonicalAuditId: event?.canonicalAuditId ?? "",
+        customerId: event?.customerId ?? "",
+        operationId: event?.operationId ?? "",
+        handledAt: event?.handledAt ?? 0,
       },
       {
-        enabled: open && hasReplayPayload,
+        enabled: open && hasRejectedPayload,
       }
     )
   )
@@ -51,7 +43,7 @@ export function IngestionEventDetailsSheet({
     return null
   }
 
-  const issue = getIssueDetails(event, payloadData)
+  const issue = getIssueDetails(event)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -65,38 +57,11 @@ export function IngestionEventDetailsSheet({
               {event.state}
             </Badge>
           </div>
-          <div className="flex items-end justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <FieldLabel>Audit ID</FieldLabel>
-              <SheetDescription className="break-all font-mono text-background-text text-xs">
-                {event.canonicalAuditId}
-              </SheetDescription>
-            </div>
-            {hasReplayPayload ? (
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                disabled={isReplayPending || isReplayQueued}
-                className="shrink-0"
-                onClick={() => {
-                  if (!canReplay) {
-                    return
-                  }
-
-                  void onReplay(event.canonicalAuditId).catch(() => undefined)
-                }}
-              >
-                {isReplayQueued ? (
-                  <CheckCircle2 className="mr-1.5 size-3.5 text-success-text" />
-                ) : isReplayPending ? (
-                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="mr-1.5 size-3.5" />
-                )}
-                {isReplayQueued ? "Replay queued" : "Replay"}
-              </Button>
-            ) : null}
+          <div className="min-w-0 space-y-1">
+            <FieldLabel>Operation ID</FieldLabel>
+            <SheetDescription className="break-all font-mono text-background-text text-xs">
+              {event.operationId}
+            </SheetDescription>
           </div>
         </SheetHeader>
 
@@ -104,19 +69,14 @@ export function IngestionEventDetailsSheet({
           <Section title="Event context">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
               <Field label="Customer">{event.customerId}</Field>
-              <Field label="Source">{event.sourceType}</Field>
-              <Field label="Ingestion mode">{formatIngestionEventModeLabel(event)}</Field>
+              <Field label="Operation">{event.sourceType}</Field>
               <Field label="Event ID">{event.eventId}</Field>
-              <Field label="Source ID">{event.sourceId}</Field>
-              {event.runId ? <Field label="Run ID">{event.runId}</Field> : null}
-              {event.workloadType || event.workloadId ? (
-                <Field label="Workload">{formatWorkload(event)}</Field>
-              ) : null}
+              <Field label="Budget key">{event.budgetKey}</Field>
               <Field label="Handled">
                 {formatDate(event.handledAt, undefined, "yyyy-MM-dd HH:mm:ss")}
               </Field>
-              <Field label="Received">
-                {formatDate(event.receivedAt, undefined, "yyyy-MM-dd HH:mm:ss")}
+              <Field label="Occurred">
+                {formatDate(event.timestamp, undefined, "yyyy-MM-dd HH:mm:ss")}
               </Field>
             </dl>
           </Section>
@@ -135,12 +95,6 @@ export function IngestionEventDetailsSheet({
             ) : null}
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
               <Field label="Rejection reason">{event.rejectionReason ?? "none"}</Field>
-              <Field label="Failure stage">{event.failureStage ?? "none"}</Field>
-              <Field label="Failure reason">{event.failureReason ?? "none"}</Field>
-              <Field label="Failure message">
-                {event.failureMessage ?? payloadData?.failureMessage ?? "none"}
-              </Field>
-              <Field label="Replayable">{event.replayable ? "yes" : "no"}</Field>
             </dl>
           </Section>
 
@@ -152,7 +106,7 @@ export function IngestionEventDetailsSheet({
                 isLoading: isPayloadLoading,
                 error: payloadError ?? null,
               }}
-              canFetchPayload={hasReplayPayload}
+              canFetchPayload={hasRejectedPayload}
             />
           </Section>
         </div>
@@ -189,34 +143,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function formatWorkload(event: IngestionEventRow): string {
-  if (event.workloadType && event.workloadId) {
-    return `${event.workloadType}:${event.workloadId}`
-  }
-
-  return event.workloadType ?? event.workloadId ?? "none"
-}
-
-function getIssueDetails(
-  event: IngestionEventRow,
-  payload: PayloadQueryData | undefined
-): { message: string; title: string } | null {
+function getIssueDetails(event: IngestionEventRow): { message: string; title: string } | null {
   if (event.state === "rejected") {
     return {
       title: "Rejected",
       message: event.rejectionReason ?? "No rejection reason was recorded.",
-    }
-  }
-
-  if (event.state === "failed") {
-    return {
-      title: "Pipeline failure",
-      message:
-        event.failureMessage ??
-        payload?.failureMessage ??
-        event.failureReason ??
-        event.failureStage ??
-        "No failure detail was recorded.",
     }
   }
 
@@ -232,17 +163,11 @@ function PayloadPanel({
   payload: PayloadQueryState
   canFetchPayload: boolean
 }) {
-  if (event.state !== "failed") {
+  if (event.state !== "rejected") {
     return (
       <MutedPanel>
-        Payload lookup is currently available for failed events only. This row is {event.state}.
+        Payload lookup is available for rejected events only. This row is {event.state}.
       </MutedPanel>
-    )
-  }
-
-  if (!event.replayable) {
-    return (
-      <MutedPanel>This failed event is not replayable, so no replay payload is stored.</MutedPanel>
     )
   }
 
@@ -255,7 +180,11 @@ function PayloadPanel({
   }
 
   if (!payload.data?.payloadJson) {
-    return <MutedPanel>No replay payload was found for this failed event.</MutedPanel>
+    return (
+      <MutedPanel>
+        The journal has no payload for this event yet; it lags the budget by a few minutes.
+      </MutedPanel>
+    )
   }
 
   return (
@@ -286,14 +215,12 @@ function MutedPanel({ children }: { children: ReactNode }) {
   )
 }
 
-function statusBadgeVariant(
-  state: IngestionEventRow["state"]
-): "success" | "warning" | "destructive" {
+function statusBadgeVariant(state: IngestionEventRow["state"]): "success" | "warning" {
   if (state === "processed") {
     return "success"
   }
 
-  return state === "failed" ? "destructive" : "warning"
+  return "warning"
 }
 
 function formatJson(rawJson: string): string {
@@ -305,7 +232,6 @@ function formatJson(rawJson: string): string {
 }
 
 type PayloadQueryData = {
-  failureMessage: string | null
   payloadJson: string
 } | null
 

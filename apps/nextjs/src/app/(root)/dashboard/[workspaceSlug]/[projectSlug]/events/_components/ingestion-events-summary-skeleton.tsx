@@ -6,13 +6,8 @@ import {
   EvidenceSection,
 } from "~/components/analytics/evidence-panel"
 
-const INGESTION_SUMMARY_METRICS = ["Success", "Processed", "Rejected", "Failed", "Attention"]
-const INGESTION_SUMMARY_SKELETON_BADGES = (
-  <>
-    <Skeleton className="h-5 w-20" />
-    <Skeleton className="h-5 w-20" />
-  </>
-)
+const INGESTION_SUMMARY_METRICS = ["Success", "Processed", "Rejected"]
+const INGESTION_SUMMARY_SKELETON_BADGES = <Skeleton className="h-5 w-20" />
 const INGESTION_SUMMARY_SKELETON_ACTIONS = <Skeleton className="h-4 w-48" />
 const INGESTION_SUMMARY_SKELETON_VALUE = <Skeleton className="h-7 w-16" />
 const INGESTION_SUMMARY_SKELETON_HELPER = <Skeleton className="h-3 w-24" />
@@ -23,11 +18,11 @@ export function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: s
     <>
       <EvidenceSection
         title="Ingestion health"
-        description={`Events ${windowLabel}. Rejections are business denials; failures need recovery.`}
+        description={`Events ${windowLabel}. The journal shows accepted events and business denials.`}
         badges={INGESTION_SUMMARY_SKELETON_BADGES}
         actions={INGESTION_SUMMARY_SKELETON_ACTIONS}
       >
-        <EvidenceMetricStrip className="md:grid-cols-5">
+        <EvidenceMetricStrip className="md:grid-cols-3">
           {INGESTION_SUMMARY_METRICS.map((label) => (
             <EvidenceMetricTile
               key={label}
@@ -43,7 +38,7 @@ export function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: s
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <EvidenceSection
           title="Request path"
-          description="Processed, rejected, and failed ingestion events by second."
+          description="Accepted and rejected usage events per minute."
           contentClassName="mt-3"
           titleClassName="text-base"
         >
@@ -53,7 +48,7 @@ export function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: s
         </EvidenceSection>
         <EvidenceSection
           title="Top rejection reasons"
-          description="Business denials grouped by reason, event, and source."
+          description="Business denials grouped by reason, event, and operation."
           contentClassName="mt-3"
           titleClassName="text-base"
         >

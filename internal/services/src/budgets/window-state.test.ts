@@ -7,6 +7,7 @@ import { windowIdOf } from "./windows"
 const now = Date.parse("2026-10-16T12:00:00.000Z")
 const day = 86_400_000
 const $ = (amount: number) => BigInt(amount) * BigInt("100000000")
+const usd = (amount: number) => ({ amount: $(amount), quantities: {} })
 
 function upsert(input: BudgetConfigInput): BudgetCommand {
   const parsed = upsertBudgetInputSchema.parse({ key: "windows", unit: "USD", ...input })
@@ -52,7 +53,7 @@ function snapshot(store: MemoryBudgetStore, at = now) {
 const charge = (key: string, amount: number): BudgetCommand => ({
   type: "charge",
   idempotencyKey: key,
-  amount: $(amount),
+  usage: usd(amount),
 })
 
 describe("canonical budget schedules", () => {
@@ -199,7 +200,7 @@ describe("canonical budget schedules", () => {
       )
     )
     expect(snapshot(store).budget.balance.remaining).toBe($(100))
-    expect(store.ledger.usage.day.consumed).toBe($(70))
+    expect(store.ledger.usage.day.consumed).toEqual(usd(70))
   })
 })
 
@@ -208,11 +209,11 @@ describe("consumed thresholds and actionable denials", () => {
     const store = create({
       limits: [{ id: "soft", window: "month", amount: "50", enforce: "soft" }],
     })
-    ok(store.run({ type: "authorize", idempotencyKey: "work", amount: $(80) }, now))
-    const command = { type: "settle", holdId: "h_1", amount: $(60) } as const
+    ok(store.run({ type: "authorize", idempotencyKey: "work", usage: usd(80) }, now))
+    const command = { type: "settle", holdId: "h_1", actual: usd(60) } as const
     expect(ok(store.run(command, now)).outcome).toMatchObject({
-      actual: $(60),
-      released: $(20),
+      actual: usd(60),
+      released: usd(20),
       crossed: ["soft"],
       replayed: false,
     })
@@ -225,7 +226,7 @@ describe("consumed thresholds and actionable denials", () => {
   it("does not recommend a reset when retained holds alone block the request", () => {
     const store = create({ limits: [{ id: "daily", window: "day", amount: "100" }] })
     ok(store.run(charge("used", 10), now))
-    ok(store.run({ type: "authorize", idempotencyKey: "open", amount: $(30) }, now))
+    ok(store.run({ type: "authorize", idempotencyKey: "open", usage: usd(30) }, now))
     expect(rejection(store.run(charge("denied", 80), now))).toMatchObject({
       code: "LIMIT_EXCEEDED",
       blocked: { remedy: "release_holds" },
@@ -253,7 +254,7 @@ describe("consumed thresholds and actionable denials", () => {
       )
     )
     ok(store.run(charge("anchored", 10), now))
-    ok(store.run({ type: "authorize", idempotencyKey: "open", amount: $(30) }, now))
+    ok(store.run({ type: "authorize", idempotencyKey: "open", usage: usd(30) }, now))
     expect(rejection(store.run(charge("denied", 80), now))).toMatchObject({
       code: "LIMIT_EXCEEDED",
       blocked: { remedy: "raise_limit" },

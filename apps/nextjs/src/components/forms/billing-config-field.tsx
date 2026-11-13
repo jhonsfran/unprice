@@ -6,9 +6,9 @@ import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unpri
 import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
-import { m } from "framer-motion"
 import type { FieldPath, FieldValues, PathValue, UseFormReturn } from "react-hook-form"
 import { FilterScroll } from "~/components/filter-scroll"
+import { billingAnchorLabel, billingIntervalOptions } from "./billing-labels"
 
 interface FormValues extends FieldValues {
   billingConfig: BillingConfig | InsertBillingConfig
@@ -21,25 +21,12 @@ export default function BillingConfigFormField<TFieldValues extends FormValues>(
   form: UseFormReturn<TFieldValues>
   isDisabled?: boolean
 }) {
-  // filter dev option when node_env is production
-  const options = Object.entries(BILLING_CONFIG)
-    .filter(([key]) => {
-      if (process.env.NODE_ENV === "production") {
-        return BILLING_CONFIG[key]?.dev !== true
-      }
-
-      // deactivate yearly for now
-      return !["yearly", "onetime"].includes(key)
-    })
-    .map(([key, value]) => ({
-      label: value.label,
-      value: key,
-      description: value.description,
-    }))
+  const options = billingIntervalOptions()
 
   const billingNamePath = "billingConfig.name" as const as FieldPath<TFieldValues>
   const billingName = form.watch(billingNamePath) as BillingInterval
-  const optionAnchor = BILLING_CONFIG[billingName]?.billingAnchorOptions
+  const interval = BILLING_CONFIG[billingName]
+  const optionAnchor = interval?.billingAnchorOptions
 
   return (
     <>
@@ -49,13 +36,13 @@ export default function BillingConfigFormField<TFieldValues extends FormValues>(
         render={({ field }) => (
           <FormItem className="flex w-full flex-col">
             <div className="flex items-center gap-1">
-              <FormLabel>Billing Interval</FormLabel>
+              <FormLabel>Billing interval</FormLabel>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <HelpCircle className="size-3.5 text-muted-foreground" />
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-[250px]">
-                  How often customers are charged (monthly, yearly, daily, etc.).
+                  How often customers are invoiced.
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -121,50 +108,48 @@ export default function BillingConfigFormField<TFieldValues extends FormValues>(
         )}
       />
       {optionAnchor && optionAnchor.length > 0 && (
-        <m.div exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.6, type: "spring" }}>
-          <FormField
-            control={form.control}
-            name={"billingConfig.billingAnchor" as FieldPath<TFieldValues>}
-            render={({ field }) => (
-              <FormItem className="flex w-full flex-col">
-                <div className="flex items-center gap-1">
-                  <FormLabel>Billing Anchor</FormLabel>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="size-3.5 text-muted-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-[250px]">
-                      The day when billing cycles start (e.g., 1st of month for monthly plans).
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <Select
-                  onValueChange={(value) => {
-                    field.onChange(value)
-                  }}
-                  value={field.value?.toString() ?? "dayOfCreation"}
-                  disabled={isDisabled}
-                >
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a billing anchor" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <FilterScroll>
-                      {optionAnchor.map((option) => (
-                        <SelectItem value={option.toString()} key={option.toString()}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </FilterScroll>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </m.div>
+        <FormField
+          control={form.control}
+          name={"billingConfig.billingAnchor" as FieldPath<TFieldValues>}
+          render={({ field }) => (
+            <FormItem className="flex w-full flex-col">
+              <div className="flex items-center gap-1">
+                <FormLabel>Billing anchor</FormLabel>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="size-3.5 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-[250px]">
+                    The day each billing period starts, such as the 1st of the month.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <Select
+                onValueChange={(value) => {
+                  field.onChange(value)
+                }}
+                value={field.value?.toString() ?? "dayOfCreation"}
+                disabled={isDisabled}
+              >
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a billing anchor" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <FilterScroll>
+                    {optionAnchor.map((option) => (
+                      <SelectItem value={option.toString()} key={option.toString()}>
+                        {billingAnchorLabel(option, interval?.billingInterval)}
+                      </SelectItem>
+                    ))}
+                  </FilterScroll>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
       )}
     </>
   )

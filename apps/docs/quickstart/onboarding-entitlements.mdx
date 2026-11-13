@@ -44,29 +44,33 @@ final cost, reserve funds before the provider call and settle actual usage after
 
 ## Report or enforce usage
 
-Use `usage.record` when you only need async usage evidence:
+Use `usage.record` to report completed usage without enforcing a spend cap:
 
 ```ts
 await unprice.usage.record({
-  customerId: customer.unpriceCustomerId,
-  eventSlug: "completions",
-  idempotencyKey: request.id,
-  properties: {
-    aiMessages: 1,
-    aiGenerations: 2,
-    aiTools: 3,
-    inputTokens: 1840,
-    outputTokens: 620
-  }
+  events: [
+    {
+      customerId: customer.unpriceCustomerId,
+      eventSlug: "completions",
+      idempotencyKey: request.id,
+      occurredAt: Date.now(),
+      properties: {
+        aiMessages: 1,
+        aiGenerations: 2,
+        aiTools: 3,
+        inputTokens: 1840,
+        outputTokens: 620
+      }
+    }
+  ]
 });
 ```
 
 Use `usage.consume` when the request path must deny over-limit or over-budget usage:
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId: customer.unpriceCustomerId,
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: request.id,
   properties: {
@@ -76,12 +80,12 @@ const { result, error } = await unprice.usage.consume({
   }
 });
 
-if (error) {
-  throw new Error(error.message);
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 });
 }
 
-if (!result.allowed) {
-  return new Response("Usage limit reached", { status: 429 });
+if (error) {
+  throw new Error(error.message);
 }
 ```
 
@@ -89,7 +93,7 @@ if (!result.allowed) {
 
 <CardGroup cols={2}>
   <Card title="Choose the runtime call" icon="code" href="/quickstart/choose-operation">
-    Compare `access.check`, `usage.record`, `usage.consume`, and budgeted runs.
+    Compare `access.check`, `usage.record`, `usage.consume`, and budgets.
   </Card>
   <Card title="Access check SDK" icon="shield-check" href="/libraries/ts/sdk/access/check">
     See the full `access.check` request and response shape.

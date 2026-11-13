@@ -21,16 +21,26 @@ export async function createPlan(
   deps: CreatePlanDeps,
   params: CreatePlanInput
 ): Promise<Result<Plan, FetchError>> {
-  const { db, logger } = deps
-  const { input, projectId } = params
-  const { slug, description, defaultPlan, enterprisePlan, title } = input
-
-  logger.set({
+  deps.logger.set({
     business: {
       operation: "plan.create",
-      project_id: projectId,
+      project_id: params.projectId,
     },
   })
+  return insertPlan(deps, params)
+}
+
+/**
+ * Inserts the plan after the project's default and enterprise plan rules. Shared by the plan
+ * use cases; the caller sets the logger's business context.
+ */
+export async function insertPlan(
+  deps: Pick<CreatePlanDeps, "db">,
+  params: CreatePlanInput
+): Promise<Result<Plan, FetchError>> {
+  const { db } = deps
+  const { input, projectId } = params
+  const { slug, description, defaultPlan, enterprisePlan, title } = input
 
   if (defaultPlan && enterprisePlan) {
     return Err(

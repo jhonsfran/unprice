@@ -1,3 +1,4 @@
+import { unitCurrency } from "@unprice/money"
 import { formatAmount } from "@unprice/money"
 import { z } from "zod"
 import {
@@ -30,6 +31,9 @@ import {
   describeDuration,
   toAmount,
 } from "./budget-shared"
+import { eventSlugSchema } from "./events"
+import { featurePricingSchema } from "./rate-cards"
+import { featureSlugSchema } from "./shared"
 
 export {
   BUDGET_WINDOWS,
@@ -58,6 +62,61 @@ export {
 // window lists, the limit cap, and the timing constants from here, so the descriptions below
 // always state the values the core enforces. Everything is trusted after this boundary.
 
+const budgetLimitFields = {
+  id: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/, "letters, digits and _ . : -")
+    .optional()
+    .openapi({
+      description:
+        "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
+      example: "month",
+    }),
+  amount: budgetAmountInputSchema.transform(toAmount),
+  window: budgetWindowSchema,
+  anchor: budgetInstantInputSchema.optional().openapi({
+    description:
+      "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
+    example: 1_792_022_400_000,
+  }),
+  enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
+}
+
+/**
+ * What a limit caps: the amount every consumption carries, or the quantity of one feature. Not on
+ * the public wire yet, where every limit caps the amount.
+ */
+export const budgetMeasureSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("amount") }),
+  z.object({ type: z.literal("quantity"), feature: featureSlugSchema }),
+])
+export type BudgetMeasure = z.infer<typeof budgetMeasureSchema>
+export type BudgetPricing = z.infer<typeof budgetPricingSchema>
+
+const anchoredOnly = <T extends { window: string; anchor?: number }>(limit: T) =>
+  limit.anchor === undefined ||
+  (BUDGET_ANCHORED_WINDOWS as readonly string[]).includes(limit.window)
+const anchoredOnlyMessage = {
+  path: ["anchor"],
+  message: "only day, week, and month windows take an anchor",
+}
+
+const budgetLimitSchema = z.object(budgetLimitFields).refine(anchoredOnly, anchoredOnlyMessage)
+
+/** A limit that may cap a feature's quantity; only internal callers send `feature`. */
+const meteredBudgetLimitSchema = z
+  .object({ ...budgetLimitFields, feature: featureSlugSchema.optional() })
+  .refine(anchoredOnly, anchoredOnlyMessage)
+
+function limitsSchema<T extends z.ZodTypeAny>(limit: T) {
+  return z
+    .array(limit)
+    .max(MAX_BUDGET_LIMITS)
+    .openapi({
+      description: `Up to ${MAX_BUDGET_LIMITS} limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts.`,
+    })
+}
+
 const budgetDefinitionFields = {
   unit: z
     .string()
@@ -66,39 +125,7 @@ const budgetDefinitionFields = {
       description: "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
       example: "USD",
     }),
-  limits: z
-    .array(
-      z
-        .object({
-          id: z
-            .string()
-            .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/, "letters, digits and _ . : -")
-            .optional()
-            .openapi({
-              description:
-                "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
-              example: "month",
-            }),
-          amount: budgetAmountInputSchema.transform(toAmount),
-          window: budgetWindowSchema,
-          anchor: budgetInstantInputSchema.optional().openapi({
-            description:
-              "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
-            example: 1_792_022_400_000,
-          }),
-          enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
-        })
-        .refine(
-          (limit) =>
-            limit.anchor === undefined ||
-            (BUDGET_ANCHORED_WINDOWS as readonly string[]).includes(limit.window),
-          { path: ["anchor"], message: "only day, week, and month windows take an anchor" }
-        )
-    )
-    .max(MAX_BUDGET_LIMITS)
-    .openapi({
-      description: `Up to ${MAX_BUDGET_LIMITS} limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts.`,
-    }),
+  limits: limitsSchema(budgetLimitSchema),
   closesAt: budgetInstantInputSchema
     .nullable()
     .optional()
@@ -130,21 +157,102 @@ const budgetDefinitionFields = {
 
 const budgetDefinitionObject = z.object(budgetDefinitionFields).strict()
 
+/**
+ * A metered feature (ADR-0008 D1, D4): the event that feeds it, how the pricing core reads it, and
+ * whether the budget prices it. An event slug may feed several features.
+ */
+export const budgetMeteredFeatureSchema = featurePricingSchema.extend({
+  slug: featureSlugSchema,
+  eventSlug: eventSlugSchema,
+  priced: z.boolean(),
+})
+
+/**
+ * How a payer budget's priced usage is paid for (ADR-0008 D10). Postpaid (an uncapped plan or a
+ * credit line) never calls the wallet: the sealed statement becomes the receivable. Prepaid (or
+ * capped) draws one wallet reservation per statement key from the customer's wallet before it
+ * admits priced usage. Absent means postpaid. Billing's compile sets it; internal callers only.
+ */
+export const budgetFundingSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("postpaid") }).strict(),
+  z.object({ mode: z.literal("prepaid"), customerId: z.string().min(1).max(36) }).strict(),
+])
+export type BudgetFunding = z.infer<typeof budgetFundingSchema>
+
+/**
+ * How a budget meters and prices usage events: the rate cards by id (their unit must be the
+ * budget's), the metered features, and how priced usage is funded. Usage always needs a
+ * registered billing statement (ADR-0007). A budget whose features
+ * are all free (a free plan) meters without cards; a priced feature needs them. Internal callers
+ * only.
+ */
+export const BUDGET_MAX_METERED_FEATURES = 64
+
+export const budgetPricingSchema = z
+  .object({
+    cards: z
+      .object({ base: z.string().min(1), overlay: z.string().min(1).optional() })
+      .strict()
+      .optional(),
+    features: z.array(budgetMeteredFeatureSchema).max(BUDGET_MAX_METERED_FEATURES),
+    funding: budgetFundingSchema.optional(),
+  })
+  .strict()
+  .refine((pricing) => pricing.cards !== undefined || !pricing.features.some((f) => f.priced), {
+    path: ["cards"],
+    message: "a priced feature needs a rate card",
+  })
+
+/** A billing period id or statement key. */
+const statementIdSchema = z.string().min(1).max(128)
+
+/** One billing period of one feature, as billing registers it with the payer budget. */
+export const budgetStatementRegistrationSchema = z
+  .object({
+    periodId: statementIdSchema,
+    statementKey: statementIdSchema,
+    featureSlug: featureSlugSchema,
+    start: budgetInstantInputSchema,
+    end: budgetInstantInputSchema,
+    /** Billing waives the period's usage (a trial): a prepaid close captures none of it. */
+    free: z.boolean().optional(),
+  })
+  .strict()
+  .refine((statement) => statement.end > statement.start, {
+    path: ["end"],
+    message: "end must be after start",
+  })
+
+export type BudgetStatementRegistration = z.output<typeof budgetStatementRegistrationSchema>
+
+const meteredBudgetDefinitionFields = {
+  ...budgetDefinitionFields,
+  limits: limitsSchema(meteredBudgetLimitSchema),
+  pricing: budgetPricingSchema.optional(),
+}
+
 function toBudgetDefinition({
   unit,
   limits,
   holds,
   onUnavailable,
   closesAt,
-}: z.output<typeof budgetDefinitionObject>) {
+  pricing,
+}: z.output<z.ZodObject<typeof meteredBudgetDefinitionFields>>) {
   return {
     unit: /^[A-Z]{3}$/.test(unit) ? `money:${unit}` : unit,
     config: {
-      limits: limits.map(({ id, enforce, ...limit }) => ({
-        ...limit,
-        id: id ?? limit.window,
-        enforce: enforce ?? "hard",
-      })),
+      ...(pricing !== undefined && { pricing }),
+      limits: limits.map(({ id, enforce, feature, ...limit }) => {
+        const measure: BudgetMeasure =
+          feature === undefined ? { type: "amount" } : { type: "quantity", feature }
+        return {
+          ...limit,
+          id: id ?? (feature === undefined ? limit.window : `${feature}:${limit.window}`),
+          enforce: enforce ?? "hard",
+          measure,
+        }
+      }),
       holds: {
         defaultTtlMs: holds?.defaultTtlMs ?? DEFAULT_HOLD_TTL_MS,
         maxTtlMs: holds?.maxTtlMs ?? MAX_HOLD_TTL_MS,
@@ -156,9 +264,20 @@ function toBudgetDefinition({
 }
 
 function withValidLimits(
-  { config }: ReturnType<typeof toBudgetDefinition>,
+  { unit, config }: ReturnType<typeof toBudgetDefinition>,
   ctx: z.RefinementCtx
 ): void {
+  // A wallet holds money in one currency, and its reservation closes when a statement seals.
+  if (config.pricing?.funding?.mode === "prepaid") {
+    const currency = unitCurrency(unit)
+    if (currency === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pricing", "funding"],
+        message: "a prepaid budget's unit must be a wallet currency",
+      })
+    }
+  }
   const seen = new Set<string>()
   config.limits.forEach((limit, index) => {
     if (seen.has(limit.id)) {
@@ -169,6 +288,17 @@ function withValidLimits(
       })
     }
     seen.add(limit.id)
+  })
+  const features = new Set<string>()
+  config.pricing?.features.forEach((feature, index) => {
+    if (features.has(feature.slug)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pricing", "features", index, "slug"],
+        message: `duplicate feature ${feature.slug}`,
+      })
+    }
+    features.add(feature.slug)
   })
   if (config.holds.defaultTtlMs > config.holds.maxTtlMs) {
     ctx.addIssue({
@@ -190,6 +320,16 @@ export const upsertBudgetInputSchema = z
   .transform(({ key, ...definition }) => ({ key, ...toBudgetDefinition(definition) }))
   .superRefine(withValidLimits)
 
+/**
+ * An upsert whose limits may cap a feature's quantity (`feature`), for callers inside Unprice. A
+ * quantity limit's id defaults to `<feature>:<window>`.
+ */
+export const upsertBudgetInternalInputSchema = z
+  .object({ key: budgetKeyInputSchema, ...meteredBudgetDefinitionFields })
+  .strict()
+  .transform(({ key, ...definition }) => ({ key, ...toBudgetDefinition(definition) }))
+  .superRefine(withValidLimits)
+
 const ifMissingSchema = budgetDefinitionInputSchema.optional().openapi({
   description:
     "The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget.",
@@ -199,15 +339,27 @@ const ifMissingSchema = budgetDefinitionInputSchema.optional().openapi({
  * A budget's config as the core holds it: amounts in base units, instants in epoch ms, every
  * default filled. Invariants: limit ids are unique and at most MAX_BUDGET_LIMITS; every amount is
  * in [0, AMOUNT_MAX]; MIN_HOLD_TTL_MS <= defaultTtlMs <= maxTtlMs <= MAX_HOLD_TTL_MS; only day,
- * week, and month windows carry an anchor.
+ * week, and month windows carry an anchor. A limit caps the amount unless its measure names a
+ * feature.
  */
-export type BudgetConfig = z.output<typeof upsertBudgetInputSchema>["config"]
-export type BudgetConfigInput = Omit<z.input<typeof upsertBudgetInputSchema>, "key" | "unit">
+export type BudgetConfig = z.output<typeof upsertBudgetInternalInputSchema>["config"]
+export type BudgetConfigInput = Omit<
+  z.input<typeof upsertBudgetInternalInputSchema>,
+  "key" | "unit"
+>
 
-/** The wire form of a config; parsing it back returns the same config. */
+/**
+ * The public wire form of a config; parsing it back with `upsertBudgetInternalInputSchema` returns
+ * the same config less its `pricing`, which only internal callers set and the public wire never
+ * shows. An amount limit has no `feature`, so a public config's wire form is unchanged.
+ */
 export function formatBudgetConfig(config: BudgetConfig) {
   return {
-    limits: config.limits.map((limit) => ({ ...limit, amount: formatAmount(limit.amount) })),
+    limits: config.limits.map(({ measure, ...limit }) => ({
+      ...limit,
+      amount: formatAmount(limit.amount),
+      ...(measure.type === "quantity" && { feature: measure.feature }),
+    })),
     holds: { ...config.holds },
     onUnavailable: "deny" as const,
     closesAt: config.closesAt,
@@ -301,6 +453,10 @@ export const budgetBalanceSchema = z.object({
       id: z.string(),
       window: budgetWindowSchema,
       enforce: budgetEnforceSchema,
+      feature: featureSlugSchema.optional().openapi({
+        description:
+          "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount",
+      }),
       amount: budgetDecimalSchema.openapi({ description: "The limit" }),
       consumed: budgetDecimalSchema.openapi({ description: "Used in the current period" }),
       held: budgetDecimalSchema.openapi({ description: "Held by open holds and leases" }),
@@ -353,6 +509,10 @@ export const budgetSchema = z.object({
         description: "The anchor instant of an anchored window, in epoch milliseconds",
       }),
       enforce: budgetEnforceSchema,
+      feature: featureSlugSchema.optional().openapi({
+        description:
+          "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount",
+      }),
     })
   ),
   holds: z.object({ defaultTtlMs: z.number().int(), maxTtlMs: z.number().int() }),

@@ -9,6 +9,7 @@ import {
   type BudgetHandle,
   type BudgetHold,
   type SpendSettlement,
+  createBudgetHandle,
   createSpend,
   createWrap,
   retryable,
@@ -85,6 +86,27 @@ export type LocalBudgetHandle = BudgetHandle & {
    * process never closes expires and counts in full. A later call opens a new lease.
    */
   close(): Promise<ApiResult<LeaseReportResponse | null>>
+}
+
+/** What `budget(key, options)` takes besides local mode. */
+export type BudgetHandleOptions = { ifMissing?: BudgetDefinitionInput }
+
+/**
+ * The handle each client's `budget(key, options)` answers: remote, or local with `mode: "local"`.
+ * `ifMissing` rides on the handle's first authorize, charge, or lease.
+ */
+export function openBudgetHandle(
+  client: {
+    budgets: GeneratedSdkResources["budgets"]
+    settlement: SpendSettlement
+    local: LocalLeases
+  },
+  key: string,
+  options?: BudgetHandleOptions | (LocalBudgetOptions & BudgetHandleOptions)
+): BudgetHandle | LocalBudgetHandle {
+  const remote = createBudgetHandle(client.budgets, key, client.settlement, options?.ifMissing)
+  if (!options || !("mode" in options)) return remote
+  return client.local.budget(remote, key, options.lease, options.ifMissing)
 }
 
 /** The client's local leases: at most one per key, and nothing kept for a key without one. */

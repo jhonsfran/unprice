@@ -7,15 +7,15 @@ import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
 const REPO_URL = siteConfig.links.github
-const DO_TEST_PATH = "apps/api/src/ingestion/entitlements/EntitlementWindowDO.workers.test.ts"
+const DO_TEST_PATH = "apps/api/src/ingestion/budget/BudgetDO.workers.test.ts"
 
 // Proof that does not depend on us publishing anything. Every row is a real
 // artifact in the repo, and every one can be run by a reader who believes
 // nothing on this page. The concurrency row is not a claim about what Redis
 // cannot do — an atomic script handles this fine, and saying otherwise is how
 // the page loses the one reader who has written one. It is evidence that our
-// own enforcement holds: five concurrent over-limit writes, partitioned, in
-// the real Workers runtime.
+// own enforcement holds: 100 parallel $0.75 holds against a $50 cap, in the
+// real Workers runtime.
 const receipts = [
   {
     label: "AI chatbot",
@@ -26,7 +26,7 @@ const receipts = [
   },
   {
     label: "concurrency",
-    fact: "5 concurrent over-limit writes → 2 accepted, 3 rejected",
+    fact: "100 parallel $0.75 holds on a $50 cap → 66 accepted, 34 rejected",
     href: `${REPO_URL}/blob/main/${DO_TEST_PATH}`,
     linkLabel: "Read the test",
     source: "demo_source" as const,

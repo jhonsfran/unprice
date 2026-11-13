@@ -26,9 +26,9 @@ import { Leader } from "./station"
 // station, not a footnote. Token-driven; motion is the sanctioned
 // request-path education: a dot walks the path in passes that share one
 // budget — allowed requests each visibly reduce the balance, so a later
-// request arrives at a balance that cannot cover it and is rejected. A
-// rejection is a 200 carrying LIMIT_EXCEEDED, never a 429; the status codes
-// on this diagram are the ones the API actually returns. The chips rest
+// request arrives at a balance that cannot cover it and is rejected.
+// A usage.consume denial returns HTTP 402 with BUDGET_EXCEEDED. The compact
+// budget handle example exposes the same denial as allowed: false. The chips rest
 // neutral and take
 // their color only when the request reaches them, and the winning outcome
 // stays lit until the next request spawns. Stacked (mobile) the fork
@@ -39,7 +39,7 @@ import { Leader } from "./station"
 // and the loop never starts, but the sequence's final chip still lights so the
 // diagram never rests on nothing; otherwise it starts when scrolled into view.
 //
-// The hero uses `reservations.reserve` because the first frame must show the
+// The hero uses `budget.authorize` because the first frame must show the
 // economic control, not a read-only check. The full trace uses `usage.consume`
 // to show the known-cost path through wallet, ledger, and invoice evidence.
 
@@ -176,7 +176,7 @@ function RequestDecisionRail({
           {/* The compact render reserves variable-cost work. The full trace
               shows the atomic known-cost path. */}
           <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
-            {compact ? "reservations.reserve" : "usage.consume"}
+            {compact ? "budget.authorize" : "usage.consume"}
           </span>
         </div>
         {compact ? null : (
@@ -257,12 +257,7 @@ function OutcomeChip({
 }: { kind: "allow" | "deny"; registry: MoneyPathRegistry; compact?: boolean }) {
   const allow = kind === "allow"
   const waypointId = allow ? "allow-chip" : "deny-chip"
-  // The real API answers with a decision in the body, not an HTTP failure: a
-  // denial is a 200 carrying allowed/accepted false and a machine-readable
-  // rejection reason. (429 is rate limiting — a different thing entirely, and
-  // showing it here would send engineers looking for a status code that never
-  // arrives.) The field name follows the call each render is making.
-  const verdict = allow ? (compact ? "allowed: true" : "accepted: true") : "LIMIT_EXCEEDED"
+  const verdict = allow ? "allowed: true" : compact ? "allowed: false" : "402 · BUDGET_EXCEEDED"
   return (
     <div
       ref={registry.waypointRefs[waypointId]}
@@ -397,10 +392,10 @@ function OutcomeFork({ registry }: { registry: MoneyPathRegistry }) {
 }
 
 const FULL_ARIA =
-  "Three identical usage.consume requests use one $10.00 budget. Each request meters 2,050 tokens at $0.002 per token on plan version pro@v3, for a cost of $4.10. The first two requests are accepted. Each one reserves $4.10, captures the ledger movement, writes the invoice line, and settles payment to your Stripe account. The balance falls to $1.80. Unprice never holds the funds. The third request is denied with LIMIT_EXCEEDED because it needs $4.10. The wallet stays untouched, and Unprice writes no ledger entry, invoice line, or charge. Your app receives the reason."
+  "Three identical usage.consume requests use one $10.00 budget. Each request meters 2,050 tokens at $0.002 per token on plan version pro@v3, for a cost of $4.10. The first two requests are accepted. Each one reserves $4.10, captures the ledger movement, writes the invoice line, and settles payment to your Stripe account. The balance falls to $1.80. Unprice never holds the funds. The third request is denied with BUDGET_EXCEEDED because it needs $4.10. The wallet stays untouched, and Unprice writes no ledger entry, invoice line, or charge. Your app receives the reason."
 
 const COMPACT_ARIA =
-  "The customer's budget has $5.90 available. A reservation authorizes $4.10 before the provider runs and leaves $1.80 available. An identical second reservation is denied with LIMIT_EXCEEDED, so the provider is never called. The full path below traces usage, wallet movement, ledger capture, invoice evidence, and payment in your own Stripe account."
+  "The customer's budget has $5.90 available. A reservation authorizes $4.10 before the provider runs and leaves $1.80 available. An identical second reservation returns allowed: false, so the provider is never called. The full path below traces usage.consume through wallet movement, ledger capture, invoice evidence, and payment in your own Stripe account."
 
 export function MoneyPath({
   className,

@@ -12,7 +12,7 @@ import {
   up,
 } from "dinero.js"
 import * as currencies from "dinero.js/currencies"
-import { LEDGER_SCALE } from "./amount"
+import { LEDGER_SCALE, type SignedAmount, formatAmount } from "./amount"
 
 export * from "./amount"
 
@@ -222,4 +222,29 @@ export function formatLedgerMoney(minor: number, currency: string): string {
 
 export function currencySymbol(currencyCode: string): string {
   return ({ USD: "$", EUR: "€", GBP: "£" } as Record<string, string>)[currencyCode] ?? currencyCode
+}
+
+/** A currency supported by the budget money unit. */
+export type Currency = "USD" | "EUR"
+
+export function unitCurrency(unit: string): Currency | null {
+  switch (unit) {
+    case "money:USD":
+      return "USD"
+    case "money:EUR":
+      return "EUR"
+    default:
+      return null
+  }
+}
+
+/** Preserve the precise amount; formatting applies only to its display value. */
+export function spendingOf(amount: SignedAmount, unit: string, options: FormatMoneyOptions = {}) {
+  const decimal = formatAmount(amount)
+  const currency = unitCurrency(unit)
+  return {
+    amount: decimal,
+    currency: currency ?? "XXX",
+    displayAmount: currency ? formatMoney(decimal, currency, options) : `${decimal} ${unit}`,
+  }
 }

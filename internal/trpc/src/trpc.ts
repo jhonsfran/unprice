@@ -3,13 +3,13 @@ import "server-only"
 import { TRPCError, initTRPC } from "@trpc/server"
 import type { Cache as C } from "@unkey/cache"
 import { UpstashRedisStore } from "@unkey/cache/stores"
-import { Analytics } from "@unprice/analytics"
 import type { NextAuthRequest } from "@unprice/auth"
 import type { Session } from "@unprice/auth/server"
 import { auth } from "@unprice/auth/server"
 import { COOKIES_APP } from "@unprice/config"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
+import { createBasinSql } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import { shouldEmitMetrics } from "@unprice/observability/env"
@@ -127,29 +127,24 @@ export const createInnerTRPCContext = (
   opts: CreateContextOptions
 ): CreateContextOptions & {
   db: Database
-  analytics: Analytics
   services: ServiceContext
 } => {
-  const analytics = new Analytics({
-    tinybirdToken: env.TINYBIRD_TOKEN,
-    tinybirdUrl: env.TINYBIRD_URL,
-    emit: true,
-    logger: opts.logger,
-  })
-
   const services = createServiceContext({
     db,
     logger: opts.logger,
-    analytics,
     waitUntil: opts.waitUntil,
     cache: opts.cache,
     metrics: opts.metrics,
+    basinSql: createBasinSql({
+      accountId: env.BASIN_SQL_ACCOUNT_ID,
+      bucket: env.BASIN_SQL_BUCKET,
+      token: env.BASIN_SQL_TOKEN,
+    }),
   })
 
   return {
     ...opts,
     db: db,
-    analytics,
     services,
   }
 }
@@ -330,6 +325,13 @@ export const t = initTRPC.context<typeof createTRPCContext>().create({
         ...shape.data,
         code: error.code,
         cause: internalError ? undefined : error.cause,
+        domainCode:
+          !internalError &&
+          error.cause &&
+          "code" in error.cause &&
+          typeof error.cause.code === "string"
+            ? error.cause.code
+            : null,
         requestId: ctx?.requestId,
         zodError:
           !internalError && error.code === "BAD_REQUEST" && error.cause instanceof ZodError

@@ -37,6 +37,7 @@ export const invoiceReconcileTask = task({
 
     try {
       const reconciled = await context.services.billing.reconcileInvoiceFromProvider({
+        caller: "job",
         projectId,
         subscriptionId,
         invoiceId,

@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, sql } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -37,7 +36,6 @@ function createProjectService(db: Database) {
   return new ProjectService({
     db,
     logger: createLogger(),
-    analytics: {} as unknown as Analytics,
     waitUntil: () => {},
     cache,
     metrics: { emit: vi.fn(), flush: vi.fn(), setColo: vi.fn() } as unknown as Metrics,

@@ -1,12 +1,4 @@
 import type {
-  PageBrowserVisits,
-  PageCountryVisits,
-  PageOverview,
-  Stats,
-  Usage,
-} from "@unprice/analytics"
-import type { budgetRuns } from "@unprice/db/schema"
-import type {
   ApiKeyExtended,
   ApiKeyType,
   Customer,
@@ -14,13 +6,14 @@ import type {
   Feature,
   PlanVersionApi,
   Project,
+  Stats,
   SubscriptionCache,
   SubscriptionStatus,
+  Usage,
   User,
   Workspace,
   WorkspaceRole,
 } from "@unprice/db/validators"
-import type { PreparedCustomerGrantContext } from "../ingestion/entitlement-context"
 import type { GetUsageDashboardOutput } from "../use-cases/analytics/get-usage-dashboard"
 
 export type ProjectFeatureCache = {
@@ -42,8 +35,6 @@ export type WorkspaceGuardCache = {
 }
 
 export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "projectId" | "isMain">
-
-export type BudgetRunCache = typeof budgetRuns.$inferSelect
 
 /**
  * What the api key cache actually holds, which is not what the table holds.
@@ -69,7 +60,6 @@ export type ApiKeyCache = Omit<ApiKeyExtended, "type"> & { type?: ApiKeyType }
 
 export type CacheNamespaces = {
   apiKeyByHash: ApiKeyCache | null
-  budgetRun: BudgetRunCache | null
   customersProject: CustomersProjectCache[] | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
@@ -84,14 +74,10 @@ export type CacheNamespaces = {
   workspaceGuard: WorkspaceGuardCache | null
   planVersionList: PlanVersionApi[] | null
   planVersion: PlanVersionApi | null
-  pageCountryVisits: PageCountryVisits | null
-  pageBrowserVisits: PageBrowserVisits | null
-  getPagesOverview: PageOverview | null
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
-  getUsage: Usage | null
+  getUsage: { usage: Usage; truncated_events: number } | null
   getUsageDashboard: GetUsageDashboardOutput | null
-  ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
 
 export type CacheNamespace = keyof CacheNamespaces

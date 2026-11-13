@@ -172,9 +172,9 @@ describe("defineEndpointContract", () => {
     const route = defineEndpointContract(
       {
         ...baseRoute,
-        path: "/v1/internal/billing-reservations/flush-for-invoicing",
-        operationId: "billingReservations.flushForInvoicing",
-        tags: ["billingReservations"],
+        path: "/v1/internal/payer-budgets/seal",
+        operationId: "budgets.internalSealPayerStatements",
+        tags: ["budgets"],
       },
       {
         audience: "internal",

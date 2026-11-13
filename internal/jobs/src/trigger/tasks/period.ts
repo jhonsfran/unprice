@@ -37,6 +37,7 @@ export const periodTask = task({
         subscriptionId,
         projectId,
         now,
+        caller: "job",
       })
 
       if (periodResult.err) {

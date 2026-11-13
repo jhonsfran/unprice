@@ -1,11 +1,10 @@
 import { createRoute } from "@hono/zod-openapi"
-import { explainChargeEventRowSchema } from "@unprice/analytics"
 import {
   ExplainChargeError,
-  type ExplainChargeOutput,
   aiAnswerEnvelopeSchema,
   aiEvidenceSchema,
   explainCharge,
+  explainChargeEventSchema,
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -48,7 +47,6 @@ export const explainChargeApiResponseSchema = z.object({
     event_count: z.number().int(),
     total_usage: z.number(),
     total_amount: z.number().int(),
-    latest_amount_after: z.number().int(),
     currency: z.string(),
     amount_scale: z.number().int(),
     first_event_at: z.number().int().nullable(),
@@ -58,7 +56,6 @@ export const explainChargeApiResponseSchema = z.object({
   pricing: z.object({
     feature_type: z.string(),
     usage_mode: z.string().nullable(),
-    tier_mode: z.string().nullable(),
     unit_of_measure: z.string(),
     description: z.string(),
     rows: z.array(
@@ -68,7 +65,7 @@ export const explainChargeApiResponseSchema = z.object({
       })
     ),
   }),
-  events: z.array(explainChargeEventRowSchema),
+  events: z.array(explainChargeEventSchema),
   answer: z.string(),
   confidence: aiAnswerEnvelopeSchema.shape.confidence,
   freshness: aiAnswerEnvelopeSchema.shape.freshness,
@@ -88,7 +85,7 @@ export const route = createRoute(
       path: "/v1/analytics/charges/explain",
       operationId: "analytics.charges.explain",
       summary: "explain charge",
-      description: "Explain one invoice line using ledger metadata and rated meter facts.",
+      description: "Explain one invoice line using ledger metadata and journal events.",
       method: "post",
       tags,
       request: {
@@ -151,7 +148,8 @@ export const registerExplainChargeV1 = (app: App) =>
       {
         db: c.get("db"),
         ledger,
-        analytics: c.get("analytics"),
+        budgetJournal: c.get("services").budgetJournal,
+        rateCards: c.get("services").rateCards,
       },
       {
         projectId,
@@ -197,7 +195,6 @@ export const registerExplainChargeV1 = (app: App) =>
         event_count: result.val.summary.eventCount,
         total_usage: result.val.summary.totalUsage,
         total_amount: result.val.summary.totalAmount,
-        latest_amount_after: result.val.summary.latestAmountAfter,
         currency: result.val.summary.currency,
         amount_scale: result.val.summary.amountScale,
         first_event_at: result.val.summary.firstEventAt,
@@ -207,25 +204,17 @@ export const registerExplainChargeV1 = (app: App) =>
       pricing: {
         feature_type: result.val.pricing.featureType,
         usage_mode: result.val.pricing.usageMode,
-        tier_mode: result.val.pricing.tierMode,
         unit_of_measure: result.val.pricing.unitOfMeasure,
         description: result.val.pricing.description,
         rows: result.val.pricing.rows,
       },
       events: result.val.events,
       answer: result.val.answer,
-      confidence: buildConfidence({
-        eventCount: result.val.summary.eventCount,
-        eventsReturned: result.val.events.length,
-      }),
-      freshness: {
-        generatedAt: Date.now(),
-        dataFrom: result.val.summary.firstEventAt,
-        dataTo: result.val.summary.lastEventAt,
-      },
-      evidence: buildEvidence(result.val),
-      warnings: buildWarnings(result.val),
-      nextActions: buildNextActions(result.val),
+      confidence: result.val.confidence,
+      freshness: result.val.freshness,
+      evidence: result.val.evidence,
+      warnings: result.val.warnings,
+      nextActions: result.val.nextActions,
       pagination: {
         limit: result.val.pagination.limit,
         offset: result.val.pagination.offset,
@@ -235,103 +224,6 @@ export const registerExplainChargeV1 = (app: App) =>
 
     return c.json(response, HttpStatusCodes.OK)
   })
-
-function buildConfidence({
-  eventCount,
-  eventsReturned,
-}: {
-  eventCount: number
-  eventsReturned: number
-}): ExplainChargeApiResponse["confidence"] {
-  if (eventCount > 0 || eventsReturned > 0) {
-    return "high"
-  }
-
-  return "medium"
-}
-
-function buildEvidence(result: ExplainChargeOutput): ExplainChargeApiResponse["evidence"] {
-  return [
-    {
-      type: "invoice" as const,
-      id: result.invoice.id,
-      source: "postgres" as const,
-      timestamp: null,
-    },
-    {
-      type: "ledger_line" as const,
-      id: result.line.entryId,
-      source: "ledger" as const,
-      timestamp: null,
-    },
-    {
-      type: "billing_period" as const,
-      id: result.line.billingPeriodId,
-      source: "postgres" as const,
-      timestamp: null,
-    },
-    ...(result.scope.featurePlanVersionId
-      ? [
-          {
-            type: "plan_version" as const,
-            id: result.scope.featurePlanVersionId,
-            source: "postgres" as const,
-            timestamp: null,
-          },
-        ]
-      : []),
-    ...result.events.map((event) => ({
-      type: "meter_fact" as const,
-      id: [
-        result.scope.projectId,
-        result.scope.customerId,
-        event.customer_entitlement_id,
-        event.grant_id,
-        event.event_id,
-      ].join(":"),
-      source: "tinybird" as const,
-      timestamp: event.timestamp,
-    })),
-  ]
-}
-
-function buildWarnings(result: ExplainChargeOutput): string[] {
-  const warnings: string[] = []
-
-  if (result.summary.eventCount === 0) {
-    warnings.push(
-      isBillingPeriodScopedLine(result)
-        ? "This non-usage line is explained from ledger and billing-period evidence; no rated meter facts are expected."
-        : "No rated meter facts were found for this invoice line."
-    )
-  }
-
-  if (result.pagination.hasMore) {
-    warnings.push("Additional rated meter facts are available on later pages.")
-  }
-
-  return warnings
-}
-
-function buildNextActions(result: ExplainChargeOutput): string[] {
-  if (result.summary.eventCount === 0) {
-    if (isBillingPeriodScopedLine(result)) {
-      return []
-    }
-
-    return ["Verify the billing period, feature slug, and period key for this invoice line."]
-  }
-
-  if (result.pagination.hasMore) {
-    return ["Request the next page to inspect the remaining rated meter facts."]
-  }
-
-  return []
-}
-
-function isBillingPeriodScopedLine(result: ExplainChargeOutput): boolean {
-  return result.scope.periodKey.startsWith("billing_period:")
-}
 
 function explainChargeErrorToApiError(error: unknown): UnpriceApiError {
   if (error instanceof ExplainChargeError) {
@@ -343,7 +235,6 @@ function explainChargeErrorToApiError(error: unknown): UnpriceApiError {
         return new UnpriceApiError({ code: "NOT_FOUND", message: error.message })
       case "BILLING_PERIOD_CONTEXT_MISMATCH":
       case "BILLING_PERIOD_METADATA_MISSING":
-      case "PERIOD_KEY_NOT_DERIVED":
         return new UnpriceApiError({ code: "BAD_REQUEST", message: error.message })
     }
   }

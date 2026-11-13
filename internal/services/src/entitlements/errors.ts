@@ -47,7 +47,3 @@ export class UnPriceEntitlementError extends BaseError<{ context?: Record<string
     })
   }
 }
-
-export class UnsupportedUsageCorrectionError extends Error {
-  override readonly name = UnsupportedUsageCorrectionError.name
-}

@@ -2,16 +2,17 @@
 
 import { Button } from "@unprice/ui/button"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
-import { AlertTriangle, Code, RotateCcw } from "lucide-react"
+import { AlertTriangle, Code } from "lucide-react"
 import { IngestionHealthStrip } from "~/components/analytics/ingestion-health-strip"
 import { RejectionReasonsPanel } from "~/components/analytics/rejection-reasons-panel"
 import { RequestPathSparkline } from "~/components/analytics/request-path-sparkline"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { IngestionEventDetailsSheet } from "./ingestion-event-details-sheet"
+import { ingestionEventKey } from "./ingestion-event-rows"
 import { IngestionEventsSummarySkeleton } from "./ingestion-events-summary-skeleton"
 import { buildIngestionEventsColumns } from "./ingestion-events-table-schema"
-import { MAX_REPLAY_IDS, isReplayQueued, useIngestionEventsData } from "./use-ingestion-events-data"
+import { useIngestionEventsData } from "./use-ingestion-events-data"
 
 const TABLE_LOADING_STATE = <EmptyPlaceholder className="min-h-[300px] border-none" isLoading />
 
@@ -32,12 +33,6 @@ export function IngestionEventsPanel() {
     isFetchingNextPage,
     hasNextPage,
     handleLoadMore,
-    handleReplay,
-    replayIsPending,
-    blockedReplayIds,
-    hasReplayableRows,
-    queuedReplayIds,
-    pendingReplayIds,
     visibleDetailsEvent,
     detailsEvent,
     setDetailsEvent,
@@ -52,7 +47,7 @@ export function IngestionEventsPanel() {
             status={status}
             isFetching={isRefreshing}
             title="Ingestion health"
-            description={`Events ${windowLabel}. Rejections are business denials; failures need recovery.`}
+            description={`Events ${windowLabel}. The journal shows accepted events and business denials.`}
             presentation="section"
             showNoEventsAction={false}
           />
@@ -77,17 +72,11 @@ export function IngestionEventsPanel() {
           workspaceSlug,
           projectSlug,
           onViewDetails: setDetailsEvent,
-          onReplay: handleReplay,
-          queuedReplayIds,
-          pendingReplayIds,
-          blockedReplayIds,
-          isReplayPending: replayIsPending,
-          hasReplayableRows,
         })}
         data={rows}
-        getRowId={(row) => row.canonicalAuditId}
+        getRowId={ingestionEventKey}
         filters={filterOptions}
-        searchPlaceholder="Search events, customers, sources, modes, reasons"
+        searchPlaceholder="Search events, customers, operations, reasons"
         searchValue={searchValue}
         onSearchValueChange={(value) => {
           void setFilters({ page: 1, search: value || null })
@@ -126,49 +115,9 @@ export function IngestionEventsPanel() {
           </EmptyPlaceholder>
         }
         loadingState={TABLE_LOADING_STATE}
-        getRowClassName={(row) =>
-          row.state === "failed"
-            ? "bg-destructive/10"
-            : row.state === "rejected"
-              ? "bg-warning/10"
-              : undefined
-        }
-        toolbarActions={({ clearSelection, selectedRows }) => {
-          const replayableRows = selectedRows.filter(
-            (row) =>
-              row.state === "failed" &&
-              row.replayable &&
-              !blockedReplayIds.has(row.canonicalAuditId)
-          )
-          const canonicalAuditIds = Array.from(
-            new Set(replayableRows.map((row) => row.canonicalAuditId))
-          )
-
-          if (canonicalAuditIds.length === 0) {
-            return null
-          }
-
-          const isOverReplayLimit = canonicalAuditIds.length > MAX_REPLAY_IDS
-
-          return (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={replayIsPending || isOverReplayLimit}
-              onClick={() => {
-                void handleReplay(canonicalAuditIds)
-                  .then(() => clearSelection())
-                  .catch(() => undefined)
-              }}
-            >
-              <RotateCcw className="mr-1.5 size-3.5" />
-              {isOverReplayLimit ? `Select ${MAX_REPLAY_IDS} or fewer` : "Replay selected"}
-            </Button>
-          )
-        }}
+        getRowClassName={(row) => (row.state === "rejected" ? "bg-warning/10" : undefined)}
         initialColumnVisibility={{
-          sourceId: false,
+          budgetKey: false,
           rejectionReason: false,
           eventId: false,
         }}
@@ -184,15 +133,6 @@ export function IngestionEventsPanel() {
         event={visibleDetailsEvent}
         open={detailsEvent !== null}
         onOpenChange={handleDetailsOpenChange}
-        onReplay={handleReplay}
-        isReplayQueued={
-          visibleDetailsEvent ? isReplayQueued(visibleDetailsEvent, queuedReplayIds) : false
-        }
-        isReplayPending={
-          visibleDetailsEvent
-            ? isReplayQueued(visibleDetailsEvent, pendingReplayIds) || replayIsPending
-            : replayIsPending
-        }
       />
     </div>
   )

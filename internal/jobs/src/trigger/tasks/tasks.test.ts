@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const serviceCalls = vi.hoisted(() => ({
   billingInvoice: vi.fn(),
+  generateBillingPeriods: vi.fn(),
+  syncSubscriptionPayerBudget: vi.fn(),
   invoiceSubscription: vi.fn(),
   renewSubscription: vi.fn(),
 }))
@@ -38,7 +40,11 @@ vi.mock("@trigger.dev/sdk/v3", () => ({
 vi.mock("./context", () => ({
   createContext: vi.fn(async () => ({
     services: {
-      billing: { billingInvoice: serviceCalls.billingInvoice },
+      billing: {
+        billingInvoice: serviceCalls.billingInvoice,
+        generateBillingPeriods: serviceCalls.generateBillingPeriods,
+        syncSubscriptionPayerBudget: serviceCalls.syncSubscriptionPayerBudget,
+      },
       subscriptions: {
         invoiceSubscription: serviceCalls.invoiceSubscription,
         renewSubscription: serviceCalls.renewSubscription,
@@ -54,6 +60,10 @@ describe("Trigger tasks", () => {
     serviceCalls.billingInvoice.mockResolvedValue(ok({ total: 100, status: "paid" }))
     serviceCalls.invoiceSubscription.mockResolvedValue(ok({ status: "active" }))
     serviceCalls.renewSubscription.mockResolvedValue(ok({ status: "active" }))
+    serviceCalls.generateBillingPeriods.mockResolvedValue(
+      ok({ cyclesCreated: 0, phasesProcessed: 1 })
+    )
+    serviceCalls.syncSubscriptionPayerBudget.mockResolvedValue(undefined)
   })
 
   it("billingTask delegates exactly once to BillingService.billingInvoice", async () => {
@@ -81,6 +91,7 @@ describe("Trigger tasks", () => {
       invoiceId: "inv_123",
       subscriptionId: "sub_123",
       projectId: "proj_123",
+      caller: "job",
       now: 1_800_000_000_000,
     })
   })
@@ -106,6 +117,7 @@ describe("Trigger tasks", () => {
     expect(serviceCalls.invoiceSubscription).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
       projectId: "proj_123",
+      caller: "job",
       now: 1_800_000_000_000,
     })
   })
@@ -132,10 +144,26 @@ describe("Trigger tasks", () => {
       now: 1_800_000_000_000,
     })
     expect(serviceCalls.renewSubscription).toHaveBeenCalledTimes(1)
+    // A job waits out open holds before the payer budget's pricing changes.
     expect(serviceCalls.renewSubscription).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
       projectId: "proj_123",
       now: 1_800_000_000_000,
+      caller: "job",
     })
+  })
+
+  it("periodTask delegates the payer sync to period generation even without new periods", async () => {
+    const { periodTask: definition } = await import("./period")
+    const periodTask = runnableTask<InvoiceTaskPayload>(definition)
+    const payload = { subscriptionId: "sub_123", projectId: "proj_123", now: 1_800_000_000_000 }
+
+    await periodTask.run(payload, { ctx: { task: { id: "task_period_1" } } })
+    serviceCalls.generateBillingPeriods.mockResolvedValueOnce(
+      ok({ cyclesCreated: 2, phasesProcessed: 1 })
+    )
+    await periodTask.run(payload, { ctx: { task: { id: "task_period_2" } } })
+
+    expect(serviceCalls.syncSubscriptionPayerBudget).not.toHaveBeenCalled()
   })
 })

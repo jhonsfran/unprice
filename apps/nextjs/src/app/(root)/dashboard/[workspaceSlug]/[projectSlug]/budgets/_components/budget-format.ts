@@ -1,15 +1,28 @@
-import { formatAmount, parseAmount } from "@unprice/money"
+import { formatAmount, parseAmount, unitCurrency } from "@unprice/money"
 
 /** Money `2000.5` reads `2,000.50`, units `2000` read `2,000`; every stored decimal is kept. */
 export function formatBudgetAmount(amount: string, unit: string): string {
   const [whole = "0", fraction = ""] = amount.split(".")
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-  const decimals = unit.startsWith("money:") ? fraction.padEnd(2, "0") : fraction
+  const decimals = unitCurrency(unit) ? fraction.padEnd(2, "0") : fraction
   return decimals ? `${grouped}.${decimals}` : grouped
 }
 
+/**
+ * A limit's figure in what it caps: the budget's unit, or the quantity of the feature a quantity
+ * limit names (`10,000 api_calls`), never a money amount.
+ */
+export function formatLimitAmount(
+  amount: string,
+  limit: Readonly<{ feature?: string }>,
+  unit: string
+): string {
+  if (limit.feature === undefined) return formatBudgetAmount(amount, unit)
+  return `${formatBudgetAmount(amount, `units:${limit.feature}`)} ${limit.feature}`
+}
+
 export function formatUnit(unit: string): string {
-  return unit.startsWith("money:") ? unit.slice("money:".length) : unit
+  return unitCurrency(unit) ?? unit
 }
 
 /** A wire decimal in base units; `remaining` can be negative, which `parseAmount` refuses. */

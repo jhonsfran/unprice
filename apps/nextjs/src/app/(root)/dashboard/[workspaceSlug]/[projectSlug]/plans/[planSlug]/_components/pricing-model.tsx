@@ -39,25 +39,6 @@ export function PricingModelIcon({
   return <Icon className={cn("size-3.5", className)} />
 }
 
-export function PricingModelBadge({
-  type,
-  className,
-}: {
-  type: FeatureType
-  className?: string
-}) {
-  return (
-    <div
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-md border bg-background-bgSubtle text-foreground",
-        className
-      )}
-    >
-      <PricingModelIcon type={type} />
-    </div>
-  )
-}
-
 export function PricingModelPicker({
   value,
   onChange,
@@ -134,9 +115,9 @@ export function getConfigureSubtitle({
   usageMode?: string | undefined
 }): string {
   if (!featureType) return "Pick a model first"
-  if (featureType === "flat") return "Set the fixed price"
-  if (featureType === "tier") return "Customer picks a quantity at signup"
-  if (featureType === "package") return "Set the per-bundle price"
+  if (featureType === "flat") return "A fixed amount per billing cycle"
+  if (featureType === "tier") return "Customer picks a quantity at signup; price it by tiers"
+  if (featureType === "package") return "Set the bundle size and its price"
   if (featureType === "usage") {
     if (usageMode === "unit") return "Charged per unit consumed"
     if (usageMode === "tier") return "Charged in tiers as usage grows"

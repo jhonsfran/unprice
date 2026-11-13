@@ -1,5 +1,5 @@
 "use client"
-import { prepareInterval, preparePage } from "@unprice/analytics"
+import { prepareInterval, preparePage } from "@unprice/db/validators"
 import { useQueryStates } from "nuqs"
 import { useMemo } from "react"
 import { intervalParser, pageParser } from "~/lib/searchParams"

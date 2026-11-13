@@ -1,6 +1,5 @@
 /** Counter arithmetic (ADR-0006 B1, B2): rolling windows forward and adding consumption. No policy. */
 
-import type { Amount } from "@unprice/money"
 import {
   type BudgetLimit,
   LEASE_REFUSAL_RETENTION_MS,
@@ -8,19 +7,21 @@ import {
   RECORD_DEDUPE_MS,
 } from "./config"
 import type {
+  Ledger,
   Operation,
   ReservationOperation,
   WindowCounters,
   WindowPeriod,
   WindowUsage,
 } from "./model"
+import { NO_USAGE, type Usage, addUsage, amountUsage, isNoUsage, usageOf } from "./usage"
 import { type WindowId, windowBounds, windowIdOf, windowSpecOf } from "./windows"
-
-const ZERO = BigInt(0)
 
 export function countersOf(usage: WindowCounters): Array<[WindowId, WindowUsage]> {
   return Object.entries(usage) as Array<[WindowId, WindowUsage]>
 }
+
+const ZERO = BigInt(0)
 
 /** The calendar counters are always present, so a map built from a ledger's counters is complete. */
 function countersFrom(entries: Iterable<[WindowId, WindowUsage]>): WindowCounters {
@@ -45,7 +46,7 @@ export function rollUsage(
     const spec = windowSpecOf(id)
     const start = windowBounds(spec, at).start
     if (start <= counter.start) return [[id, counter]]
-    if (counter.consumed > ZERO && limited.has(id)) {
+    if (!isNoUsage(counter.consumed) && limited.has(id)) {
       const { end } = windowBounds(spec, counter.start)
       if (end === null) throw new Error(`window ${id} rolled but never ends`)
       periods.push({ windowId: id, start: counter.start, end, consumed: counter.consumed })
@@ -54,7 +55,7 @@ export function rollUsage(
       retired.push(id)
       return []
     }
-    return [[id, { start, consumed: ZERO }]]
+    return [[id, { start, consumed: NO_USAGE }]]
   })
   return { usage: countersFrom(rolled), periods, retired }
 }
@@ -69,26 +70,39 @@ export function trackLimits(
     .filter((limit) => limit.anchor !== undefined && usage[windowIdOf(limit)] === undefined)
     .map((limit): [WindowId, WindowUsage] => [
       windowIdOf(limit),
-      { start: windowBounds(limit, at).start, consumed: ZERO },
+      { start: windowBounds(limit, at).start, consumed: NO_USAGE },
     ])
   return added.length === 0 ? usage : countersFrom([...countersOf(usage), ...added])
 }
 
-/** Adds `amount` to every counter. */
-export function consume(usage: WindowCounters, amount: Amount): WindowCounters {
-  if (amount === ZERO) return usage
+/**
+ * After a unit change (ADR-0008 D1): every counter's amount restarts at zero in its current window,
+ * because it counted another unit; quantities carry over.
+ */
+export function restartAmounts(usage: WindowCounters): WindowCounters {
   return countersFrom(
     countersOf(usage).map(([id, counter]): [WindowId, WindowUsage] => [
       id,
-      { start: counter.start, consumed: counter.consumed + amount },
+      { start: counter.start, consumed: usageOf(ZERO, counter.consumed.quantities) },
     ])
   )
 }
 
-/** What an open reservation counts against every limit; zero once it closed. */
-export function exposureOf(row: ReservationOperation): Amount {
-  if (row.state.status !== "open") return ZERO
-  return row.kind === "hold" ? row.amount : row.granted - row.captured
+/** Adds the whole vector to every counter. */
+export function consume(usage: WindowCounters, consumed: Usage): WindowCounters {
+  if (isNoUsage(consumed)) return usage
+  return countersFrom(
+    countersOf(usage).map(([id, counter]): [WindowId, WindowUsage] => [
+      id,
+      { start: counter.start, consumed: addUsage(counter.consumed, consumed) },
+    ])
+  )
+}
+
+/** What an open reservation counts against every limit; nothing once it closed. */
+export function exposureOf(row: ReservationOperation): Usage {
+  if (row.state.status !== "open") return NO_USAGE
+  return row.kind === "hold" ? row.reserved : amountUsage(row.granted - row.captured)
 }
 
 /**
@@ -120,4 +134,27 @@ export function alarmAt(operation: Operation): number {
   const due = dueAt(operation)
   if (due === null) throw new Error(`closed row ${operation.id} has no retention end`)
   return due
+}
+
+export const emptyLedger: Ledger = {
+  lastAt: 0,
+  holdSeq: 0,
+  held: NO_USAGE,
+  usage: {
+    hour: { start: 0, consumed: NO_USAGE },
+    day: { start: 0, consumed: NO_USAGE },
+    week: { start: 0, consumed: NO_USAGE },
+    month: { start: 0, consumed: NO_USAGE },
+    never: { start: 0, consumed: NO_USAGE },
+  },
+  operations: {
+    upsert: 0,
+    authorize: 0,
+    settle: 0,
+    release: 0,
+    charge: 0,
+    record: 0,
+    lease: 0,
+    report: 0,
+  },
 }

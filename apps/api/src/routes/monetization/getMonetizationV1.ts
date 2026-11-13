@@ -79,6 +79,7 @@ export const registerGetMonetizationV1 = (app: App) =>
       {
         db: c.get("db"),
         logger: c.get("logger"),
+        services: { rateCards: c.get("services").rateCards },
       },
       {
         // never a query parameter: the project is the credential's

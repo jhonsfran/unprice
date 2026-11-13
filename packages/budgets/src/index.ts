@@ -34,8 +34,9 @@ export type {
   ModelRate,
   ModelTokenRates,
 } from "./model-catalog"
-export { createLocalLeases } from "./budget-local"
+export { createLocalLeases, openBudgetHandle } from "./budget-local"
 export type {
+  BudgetHandleOptions,
   LeaseReportResponse,
   LeaseTransport,
   LocalBudgetHandle,

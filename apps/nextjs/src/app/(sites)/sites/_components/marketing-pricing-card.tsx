@@ -16,7 +16,7 @@ import { Separator } from "@unprice/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
-import Cookies from "js-cookie"
+import { pricingCtaHref, trackWebEvent } from "~/lib/pricing-cta"
 
 export interface MarketingPricingPlan {
   name: string
@@ -33,11 +33,13 @@ export interface MarketingPricingPlan {
       title: string
       type: "flat" | "usage" | "tier" | "package"
       description?: string
-      config?: Record<string, unknown>
+      /** The feature's price on the plan version's rate card; null when unpriced. */
+      price?: string | null
     }
   >[]
   cta: string
   ctaLink: string
+  pageId: string
   currency: string
   billingPeriod: string
   version: string
@@ -102,17 +104,6 @@ export function MarketingPricingCard({
 
             if (!feature) return null
 
-            const config = feature.config as {
-              tiers?: {
-                firstUnit: number
-                lastUnit: number | null
-                unitPrice: { displayAmount: string }
-                flatPrice: { displayAmount: string }
-              }[]
-              usageMode?: string
-              price?: { displayAmount: string }
-            } | null
-
             return (
               <li key={featureTitle} className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center">
@@ -144,44 +135,12 @@ export function MarketingPricingCard({
                           <span className="font-medium">{feature.type}</span>
                         </div>
 
-                        {config?.tiers && config.tiers.length > 0 && (
-                          <div className="mt-2 overflow-hidden rounded border text-[10px]">
-                            <table className="w-full border-collapse">
-                              <thead className="bg-muted">
-                                <tr>
-                                  <th className="px-2 py-1 text-left">Units</th>
-                                  <th className="px-2 py-1 text-right">Price</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {config.tiers.map((tier) => (
-                                  <tr key={tier.firstUnit} className="border-t">
-                                    <td className="px-2 py-1">
-                                      {tier.firstUnit} - {tier.lastUnit ?? "∞"}
-                                    </td>
-                                    <td className="px-2 py-1 text-right">
-                                      {tier.unitPrice.displayAmount}/unit
-                                      {Number.parseFloat(tier.flatPrice.displayAmount) > 0 && (
-                                        <div className="text-[8px] text-muted-foreground">
-                                          +{tier.flatPrice.displayAmount} flat
-                                        </div>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                        {feature.price && (
+                          <div className="flex justify-between text-[10px]">
+                            <span>Price</span>
+                            <span className="font-medium">{feature.price}</span>
                           </div>
                         )}
-
-                        {feature.type === "usage" &&
-                          config?.usageMode === "unit" &&
-                          config?.price && (
-                            <div className="flex justify-between text-[10px]">
-                              <span>Price per unit</span>
-                              <span className="font-medium">{config.price.displayAmount}</span>
-                            </div>
-                          )}
                       </div>
                     </div>
                   </TooltipContent>
@@ -209,14 +168,12 @@ export function MarketingPricingCard({
           })}
           variant={isPopular || isOnly ? "primary" : "default"}
           onClick={() => {
-            const ctaLink = new URL(plan.ctaLink)
-            const sessionId = Cookies.get("session-id")
-            ctaLink.searchParams.set("sessionId", sessionId ?? "")
-
-            // @ts-ignore
-            window.Unprice.trackEvent("plan_click", {
-              plan_version_id: plan.id,
+            const ctaLink = pricingCtaHref(plan.ctaLink, {
+              planVersionId: plan.id,
+              pageId: plan.pageId,
             })
+
+            trackWebEvent("plan_click", { plan_version_id: plan.id })
 
             // if enterprise we need email
             if (plan.isEnterprisePlan) {
@@ -226,7 +183,7 @@ export function MarketingPricingCard({
               const body = `I'm interested in the ${plan.name} (enterprise plan). Please contact me.`
               window.open(`mailto:${plan.contactEmail}?subject=${subject}&body=${body}`, "_blank")
             } else {
-              window.open(ctaLink.toString(), "_blank")
+              window.open(ctaLink, "_blank")
             }
           }}
         >

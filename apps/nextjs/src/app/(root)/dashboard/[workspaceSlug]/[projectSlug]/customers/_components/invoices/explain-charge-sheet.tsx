@@ -107,8 +107,8 @@ function ExplainChargeContent({
   line: InvoiceLine
 }) {
   const ledgerLineCount = explanation.evidence.filter((item) => item.type === "ledger_line").length
-  const ratedFactsLabel = `${formatNumber(explanation.summary.eventCount)} rated ${
-    explanation.summary.eventCount === 1 ? "fact" : "facts"
+  const journalEventsLabel = `${formatNumber(explanation.summary.eventCount)} journal ${
+    explanation.summary.eventCount === 1 ? "event" : "events"
   }`
 
   return (
@@ -121,7 +121,7 @@ function ExplainChargeContent({
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric label="Usage" value={formatNumber(explanation.summary.totalUsage)} />
-        <Metric label="Rated facts" value={formatNumber(explanation.summary.eventCount)} />
+        <Metric label="Journal events" value={formatNumber(explanation.summary.eventCount)} />
         <Metric label="Amount" value={formatLedgerMoney(line.amount, invoice.currency)} />
       </div>
 
@@ -137,7 +137,7 @@ function ExplainChargeContent({
           </span>
         </div>
         <div className="mt-1 text-muted-foreground text-xs">
-          {ratedFactsLabel}
+          {journalEventsLabel}
           {ledgerLineCount > 1 ? `, grouped from ${ledgerLineCount} ledger captures` : ""}
         </div>
       </div>
@@ -159,7 +159,7 @@ function ExplainChargeContent({
             {explanation.events.map((event) => (
               <div
                 className="grid grid-cols-[1fr_auto] gap-3 border-b px-3 py-2 text-sm last:border-b-0"
-                key={event.event_id}
+                key={event.operation_id}
               >
                 <div className="min-w-0">
                   <div className="truncate font-medium">{event.event_slug}</div>

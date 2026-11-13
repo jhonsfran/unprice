@@ -1,4 +1,4 @@
-import { type Interval, statsSchema } from "@unprice/analytics"
+import { type Interval, statsSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 

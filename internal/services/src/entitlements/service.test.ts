@@ -110,7 +110,6 @@ function createEntitlementService(db: unknown): EntitlementService {
   return new EntitlementService({
     db: db as never,
     logger: logger as never,
-    analytics: {} as never,
     waitUntil: vi.fn(),
     cache: {
       accessControlList: {},
@@ -149,7 +148,6 @@ describe("EntitlementService access control list", () => {
     const service = new EntitlementService({
       db: { select } as never,
       logger: { error: vi.fn(), set: vi.fn(), warn: vi.fn() } as never,
-      analytics: {} as never,
       waitUntil: vi.fn(),
       cache: cache as never,
       metrics: {} as never,

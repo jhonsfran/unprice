@@ -1,47 +1,46 @@
 import {
-  type FeatureUsagePeriodRow,
-  type FeatureUsageTimeseriesRow,
   type Interval,
-  type TopConsumerRow,
   analyticsIntervalSchema,
   prepareInterval,
-} from "@unprice/analytics"
-import { inArray } from "@unprice/db"
-import type { Database } from "@unprice/db"
-import { customers } from "@unprice/db/schema"
-import type { Currency } from "@unprice/db/validators"
-import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
+  unitSpendingSchema,
+} from "@unprice/db/validators"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { type SignedAmount, formatAmount, spendingOf } from "@unprice/money"
 import { z } from "zod"
+import {
+  FEATURE_SLOTS,
+  type FeatureUsageRow,
+  customerOfKey,
+  featureUsageQuery,
+  splitOverflow,
+  topPayersQuery,
+} from "../../analytics/budget-journal"
+import type { ServiceContext } from "../../context"
 
 const MONEY_DISPLAY_OPTIONS = {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 }
 
-const usageDashboardMoneySchema = z.object({
-  amount: z.string(),
-  currency: z.string().length(3),
-  displayAmount: z.string(),
-})
-
 export const usageDashboardFeatureSchema = z.object({
   featureSlug: z.string(),
   usage: z.number(),
-  spending: usageDashboardMoneySchema,
+  spending: z.array(unitSpendingSchema),
 })
 
+/** One feature's usage within one time bucket (not cumulative). */
 export const usageDashboardTimeseriesRowSchema = z.object({
   date: z.number().int(),
   featureSlug: z.string(),
   usage: z.number(),
-  spending: usageDashboardMoneySchema,
+  spending: z.array(unitSpendingSchema),
 })
 
 export const usageDashboardTopConsumerSchema = z.object({
   customerId: z.string(),
   email: z.string(),
   name: z.string(),
+  /** Usage events the customer's payer budget accepted in the range. */
   totalUsage: z.number(),
   displaySpending: z.string(),
 })
@@ -57,7 +56,7 @@ export const getUsageDashboardOutputSchema = z.object({
   summary: z.object({
     featureCount: z.number().int(),
     totalLatestUsage: z.number(),
-    spending: z.array(usageDashboardMoneySchema),
+    spending: z.array(unitSpendingSchema),
   }),
   features: z.array(usageDashboardFeatureSchema),
   timeseries: z.array(usageDashboardTimeseriesRowSchema),
@@ -67,153 +66,89 @@ export const getUsageDashboardOutputSchema = z.object({
     dataFrom: z.number().int(),
     dataTo: z.number().int(),
   }),
+  /** Partial-data notes: the dashboard still renders. */
+  warnings: z.array(z.string()).optional(),
   error: z.string().optional(),
 })
 
-export type UsageDashboardMoney = z.infer<typeof usageDashboardMoneySchema>
+export type UsageDashboardMoney = z.infer<typeof unitSpendingSchema>
 export type UsageDashboardFeature = z.infer<typeof usageDashboardFeatureSchema>
 export type UsageDashboardTimeseriesRow = z.infer<typeof usageDashboardTimeseriesRowSchema>
 export type UsageDashboardTopConsumer = z.infer<typeof usageDashboardTopConsumerSchema>
 export type GetUsageDashboardInput = z.input<typeof getUsageDashboardInputSchema>
 export type GetUsageDashboardOutput = z.infer<typeof getUsageDashboardOutputSchema>
 
-export type GetUsageDashboardAnalytics = {
-  getFeaturesUsageTimeseries(params: {
-    project_id: string
-    customer_id?: string
-    start?: number
-    end?: number
-  }): Promise<{ data?: FeatureUsageTimeseriesRow[] }>
-  getFeaturesUsagePeriod(params: {
-    project_id: string
-    customer_id?: string
-    start?: number
-    end?: number
-  }): Promise<{ data?: FeatureUsagePeriodRow[] }>
-  getTopConsumers(params: {
-    project_id: string
-    start?: number
-    end?: number
-    limit?: number
-  }): Promise<{ data?: TopConsumerRow[] }>
-}
-
-export type GetUsageDashboardDeps = {
-  analytics: GetUsageDashboardAnalytics
-  db: Database
+export type GetUsageDashboardDeps = Pick<ServiceContext, "budgetJournal"> & {
+  customers: Pick<ServiceContext["customers"], "findManyByIds">
   now?: () => number
 }
 
-type GetUsageDashboardFailure = FetchError
+type FeatureTotals = { quantity: SignedAmount; amounts: Map<string, SignedAmount> }
 
-type FeatureState = {
-  usage: number
-  amountAfter: number
-  currency: string
-}
-
+/**
+ * Usage per feature over a range, read from the budget journal (ADR-0008 D7): what each payer
+ * budget accepted, priced at ingestion. History lags the budget by the journal's export (minutes);
+ * live numbers come from the payer budget. Each amount keeps the unit the budget exported;
+ * amounts of different currencies or credit units are never added together.
+ */
 export async function getUsageDashboard(
   deps: GetUsageDashboardDeps,
   rawInput: GetUsageDashboardInput
-): Promise<Result<GetUsageDashboardOutput, GetUsageDashboardFailure>> {
+): Promise<Result<GetUsageDashboardOutput, FetchError>> {
   const input = getUsageDashboardInputSchema.parse(rawInput)
   const generatedAt = deps.now?.() ?? Date.now()
   const interval = prepareInterval(input.range, generatedAt)
-  const queryWindow = alignRollupWindow(interval)
-  const usageQuery = {
-    project_id: input.projectId,
-    ...(input.customerId ? { customer_id: input.customerId } : {}),
-    start: queryWindow.start,
-    end: queryWindow.end,
+  const bucket = interval.granularity === "hour" ? "hour" : "day"
+  const window = {
+    from: new Date(bucket === "hour" ? floorUtcHour(interval.start) : floorUtcDay(interval.start)),
+    to: new Date(interval.end),
   }
 
-  const [timeseriesResult, periodResult] = await Promise.all([
-    wrapResult(
-      deps.analytics.getFeaturesUsageTimeseries(usageQuery),
-      (error) =>
-        new FetchError({
-          message: error.message,
-          retry: true,
-          context: {
-            url: "tinybird:v1_get_feature_usage_timeseries",
-            method: "GET",
-            projectId: input.projectId,
-            customerId: input.customerId,
-          },
-        })
+  const [usage, top] = await Promise.all([
+    deps.budgetJournal.read(
+      featureUsageQuery({
+        projectId: input.projectId,
+        customerId: input.customerId,
+        window,
+        bucket,
+      })
     ),
-    wrapResult(
-      deps.analytics.getFeaturesUsagePeriod(usageQuery),
-      (error) =>
-        new FetchError({
-          message: error.message,
-          retry: true,
-          context: {
-            url: "tinybird:v1_get_feature_usage_period",
-            method: "GET",
-            projectId: input.projectId,
-            customerId: input.customerId,
-          },
-        })
-    ),
+    input.customerId
+      ? Promise.resolve(Ok([]))
+      : loadTopConsumers({
+          deps,
+          projectId: input.projectId,
+          window,
+          limit: input.topConsumersLimit,
+        }),
   ])
+  if (usage.err) return Err(usage.err)
+  if (top.err) return Err(top.err)
+  const { rows, truncatedEvents: overflow } = splitOverflow(usage.val)
+  const priced = rows.filter(
+    (row): row is typeof row & { bucket: Date } => row.bucket instanceof Date
+  )
+  const features = buildFeatureRows(priced)
+  const topConsumers = top.val
 
-  if (timeseriesResult.err) {
-    return Err(timeseriesResult.err)
-  }
-
-  if (periodResult.err) {
-    return Err(periodResult.err)
-  }
-
-  const timeseriesRows = timeseriesResult.val.data ?? []
-  const periodRows = periodResult.val.data ?? []
-  const denseTimeseries = buildDenseTimeseries(timeseriesRows)
-  const features = buildFeatureRows(periodRows)
-  const summary = buildSummary(features)
-
-  let topConsumers: UsageDashboardTopConsumer[] = []
-
-  if (!input.customerId) {
-    const topConsumersResult = await loadTopConsumers({
-      deps,
-      projectId: input.projectId,
-      start: queryWindow.start,
-      end: queryWindow.end,
-      limit: input.topConsumersLimit,
+  return Ok(
+    getUsageDashboardOutputSchema.parse({
+      summary: buildSummary(features, priced),
+      features,
+      timeseries: buildTimeseries(priced),
+      topConsumers,
+      freshness: {
+        generatedAt,
+        dataFrom: window.from.getTime(),
+        dataTo: window.to.getTime(),
+      },
+      ...(overflow > 0 && {
+        warnings: [
+          `${overflow} events fed more than ${FEATURE_SLOTS} features; their other features are not shown.`,
+        ],
+      }),
     })
-
-    if (topConsumersResult.err) {
-      return Err(topConsumersResult.err)
-    }
-
-    topConsumers = topConsumersResult.val
-  }
-
-  const output: GetUsageDashboardOutput = {
-    summary,
-    features,
-    timeseries: denseTimeseries,
-    topConsumers,
-    freshness: {
-      generatedAt,
-      dataFrom: queryWindow.start,
-      dataTo: queryWindow.end,
-    },
-  }
-
-  return Ok(getUsageDashboardOutputSchema.parse(output))
-}
-
-function alignRollupWindow(interval: ReturnType<typeof prepareInterval>): {
-  start: number
-  end: number
-} {
-  return {
-    start:
-      interval.granularity === "hour" ? floorUtcHour(interval.start) : floorUtcDay(interval.start),
-    end: interval.end,
-  }
+  )
 }
 
 function floorUtcHour(timestamp: number): number {
@@ -258,242 +193,137 @@ export function hasUsageDashboardEvidence(output: GetUsageDashboardOutput): bool
   )
 }
 
-function buildDenseTimeseries(rows: FeatureUsageTimeseriesRow[]): UsageDashboardTimeseriesRow[] {
-  const rowsByDate = new Map<number, FeatureUsageTimeseriesRow[]>()
-  const featureSlugs = new Set<string>()
-
+/** Every bucket that has usage, each with a row per feature seen in the range (zero when idle). */
+function buildTimeseries(
+  rows: readonly (FeatureUsageRow & { feature_slug: string; bucket: Date })[]
+): UsageDashboardTimeseriesRow[] {
+  const byBucket = new Map<number, Map<string, FeatureTotals>>()
+  const slugs = new Set<string>()
   for (const row of rows) {
-    featureSlugs.add(row.feature_slug)
-
-    const existing = rowsByDate.get(row.date) ?? []
-    existing.push(row)
-    rowsByDate.set(row.date, existing)
+    slugs.add(row.feature_slug)
+    const date = row.bucket.getTime()
+    const features = byBucket.get(date) ?? new Map<string, FeatureTotals>()
+    byBucket.set(date, features)
+    const totals = features.get(row.feature_slug) ?? zeroTotals()
+    features.set(row.feature_slug, add(totals, row))
   }
 
-  const features = [...featureSlugs].sort()
-  const dates = [...rowsByDate.keys()].sort((a, b) => a - b)
-  const state = new Map<string, FeatureState>()
-  const denseRows: UsageDashboardTimeseriesRow[] = []
-
-  for (const date of dates) {
-    for (const row of rowsByDate.get(date) ?? []) {
-      state.set(row.feature_slug, {
-        usage: row.usage ?? 0,
-        amountAfter: row.amount_after ?? 0,
-        currency: row.currency ?? "USD",
+  const featureSlugs = [...slugs].sort()
+  return [...byBucket.keys()]
+    .sort((a, b) => a - b)
+    .flatMap((date) =>
+      featureSlugs.map((featureSlug) => {
+        const totals = byBucket.get(date)?.get(featureSlug) ?? zeroTotals()
+        return {
+          date,
+          featureSlug,
+          usage: units(totals.quantity),
+          spending: spendingByUnit(totals.amounts),
+        }
       })
-    }
-
-    for (const featureSlug of features) {
-      const current = state.get(featureSlug) ?? {
-        usage: 0,
-        amountAfter: 0,
-        currency: "USD",
-      }
-
-      denseRows.push({
-        date,
-        featureSlug,
-        usage: current.usage,
-        spending: formatLedgerMoney(current.amountAfter, current.currency),
-      })
-    }
-  }
-
-  return denseRows
-}
-
-function buildFeatureRows(rawRows: FeatureUsagePeriodRow[]): UsageDashboardFeature[] {
-  const aggregates = new Map<
-    string,
-    { totalUsage: number; totalAmountAfter: number; currency: string }
-  >()
-
-  for (const row of rawRows) {
-    const existing = aggregates.get(row.feature_slug)
-    const usage = row.usage ?? row.value_after ?? 0
-    const amountAfter = row.amount_after ?? 0
-    const currency = row.currency ?? "USD"
-
-    if (existing) {
-      existing.totalUsage += usage
-      existing.totalAmountAfter += amountAfter
-      // Keep the most recent currency (last row wins since rows are date-ordered)
-      existing.currency = currency
-    } else {
-      aggregates.set(row.feature_slug, {
-        totalUsage: usage,
-        totalAmountAfter: amountAfter,
-        currency,
-      })
-    }
-  }
-
-  return [...aggregates.entries()]
-    .map(([featureSlug, agg]) => ({
-      featureSlug,
-      usage: agg.totalUsage,
-      spending: formatLedgerMoney(agg.totalAmountAfter, agg.currency),
-    }))
-    .sort((a, b) => {
-      if (b.usage !== a.usage) {
-        return b.usage - a.usage
-      }
-
-      return a.featureSlug.localeCompare(b.featureSlug)
-    })
-}
-
-function buildSummary(features: UsageDashboardFeature[]): GetUsageDashboardOutput["summary"] {
-  const totalsByCurrency = new Map<string, number>()
-
-  for (const feature of features) {
-    const amount = Number(feature.spending.amount)
-
-    if (!Number.isFinite(amount)) {
-      continue
-    }
-
-    totalsByCurrency.set(
-      feature.spending.currency,
-      (totalsByCurrency.get(feature.spending.currency) ?? 0) + amount
     )
+}
+
+function buildFeatureRows(
+  rows: readonly (FeatureUsageRow & { feature_slug: string })[]
+): UsageDashboardFeature[] {
+  const byFeature = new Map<string, FeatureTotals>()
+  for (const row of rows) {
+    byFeature.set(row.feature_slug, add(byFeature.get(row.feature_slug) ?? zeroTotals(), row))
   }
 
+  return [...byFeature.entries()]
+    .map(([featureSlug, totals]) => ({
+      featureSlug,
+      usage: units(totals.quantity),
+      spending: spendingByUnit(totals.amounts),
+    }))
+    .sort((a, b) => b.usage - a.usage || a.featureSlug.localeCompare(b.featureSlug))
+}
+
+function buildSummary(
+  features: readonly UsageDashboardFeature[],
+  rows: readonly FeatureUsageRow[]
+): GetUsageDashboardOutput["summary"] {
+  const amounts = new Map<string, SignedAmount>()
+  for (const row of rows) addAmount(amounts, row.unit, row.amount)
   return {
     featureCount: features.length,
     totalLatestUsage: features.reduce((sum, feature) => sum + feature.usage, 0),
-    spending: [...totalsByCurrency.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([currency, amount]) => formatMajorMoney(amount, currency)),
+    spending: spendingByUnit(amounts),
   }
 }
 
 async function loadTopConsumers({
   deps,
   projectId,
-  start,
-  end,
+  window,
   limit,
 }: {
   deps: GetUsageDashboardDeps
   projectId: string
-  start: number
-  end: number
+  window: { from: Date; to: Date }
   limit: number
 }): Promise<Result<UsageDashboardTopConsumer[], FetchError>> {
-  const analyticsResult = await wrapResult(
-    deps.analytics.getTopConsumers({
-      project_id: projectId,
-      start,
-      end,
-      limit,
-    }),
-    (error) =>
-      new FetchError({
-        message: error.message,
-        retry: true,
-        context: {
-          url: "tinybird:v1_get_top_consumers",
-          method: "GET",
-          projectId,
-        },
-      })
-  )
+  const top = await deps.budgetJournal.read(topPayersQuery({ projectId, window, limit }))
+  if (top.err) return Err(top.err)
 
-  if (analyticsResult.err) {
-    return Err(analyticsResult.err)
+  const rows = top.val.flatMap((row) => {
+    const customerId = customerOfKey(row.budget_key)
+    return customerId ? [{ ...row, customerId }] : []
+  })
+  if (rows.length === 0) return Ok([])
+
+  const found = await deps.customers.findManyByIds({
+    projectId,
+    ids: rows.map((row) => row.customerId),
+  })
+  if (found.err) return Err(found.err)
+
+  const byId = new Map(found.val.map((customer) => [customer.id, customer]))
+  const consumers = new Map<
+    string,
+    { customer: (typeof found.val)[number]; events: number; amounts: Map<string, SignedAmount> }
+  >()
+  for (const row of rows) {
+    const customer = byId.get(row.customerId)
+    if (!customer) continue
+    const consumer = consumers.get(row.customerId) ?? { customer, events: 0, amounts: new Map() }
+    consumer.events += row.events
+    addAmount(consumer.amounts, row.unit, row.amount)
+    consumers.set(row.customerId, consumer)
   }
-
-  const rows = analyticsResult.val.data ?? []
-
-  if (rows.length === 0) {
-    return Ok([])
-  }
-
-  const customerIds = rows.map((row) => row.customer_id)
-
-  const dbResult = await wrapResult(
-    deps.db
-      .select({ id: customers.id, email: customers.email, name: customers.name })
-      .from(customers)
-      .where(inArray(customers.id, customerIds)),
-    (error) =>
-      new FetchError({
-        message: error.message,
-        retry: false,
-        context: {
-          url: "db:customers",
-          method: "SELECT",
-          projectId,
-        },
-      })
-  )
-
-  if (dbResult.err) {
-    return Err(dbResult.err)
-  }
-
-  const customerMap = new Map(dbResult.val.map((customer) => [customer.id, customer]))
-
   return Ok(
-    rows
-      .map((row) => mapTopConsumer(row, customerMap))
-      .filter((row): row is UsageDashboardTopConsumer => row !== null)
+    [...consumers.values()].map(({ customer, events, amounts }) => ({
+      customerId: customer.id,
+      email: customer.email,
+      name: customer.name,
+      totalUsage: events,
+      displaySpending: spendingByUnit(amounts)
+        .map((amount) => amount.displayAmount)
+        .join(" + "),
+    }))
   )
 }
 
-function mapTopConsumer(
-  row: TopConsumerRow,
-  customerMap: Map<string, { id: string; email: string; name: string }>
-): UsageDashboardTopConsumer | null {
-  const customer = customerMap.get(row.customer_id)
+const zeroTotals = (): FeatureTotals => ({ quantity: BigInt(0), amounts: new Map() })
 
-  if (!customer) {
-    return null
-  }
-
-  const currency = row.currency ?? "USD"
-
-  return {
-    customerId: row.customer_id,
-    email: customer.email,
-    name: customer.name,
-    totalUsage: row.total_usage ?? 0,
-    displaySpending: formatLedgerMoney(row.total_amount_after ?? 0, currency).displayAmount,
-  }
+function add(totals: FeatureTotals, row: FeatureUsageRow): FeatureTotals {
+  addAmount(totals.amounts, row.unit, row.amount)
+  return { quantity: totals.quantity + row.quantity, amounts: totals.amounts }
 }
 
-function formatLedgerMoney(amountAfter: number, rawCurrency: string): UsageDashboardMoney {
-  const currency = normalizeCurrency(rawCurrency)
-  const amount = trimInsignificantZeros(toDecimal(fromLedgerMinor(amountAfter, currency)))
-
-  return {
-    amount,
-    currency,
-    displayAmount: formatMoney(amount, currency, MONEY_DISPLAY_OPTIONS),
-  }
+function addAmount(amounts: Map<string, SignedAmount>, unit: string, amount: SignedAmount): void {
+  amounts.set(unit, (amounts.get(unit) ?? BigInt(0)) + amount)
 }
 
-function formatMajorMoney(amount: number, rawCurrency: string): UsageDashboardMoney {
-  const currency = normalizeCurrency(rawCurrency)
-  const value = trimInsignificantZeros(amount.toFixed(8))
-
-  return {
-    amount: value,
-    currency,
-    displayAmount: formatMoney(value, currency, MONEY_DISPLAY_OPTIONS),
-  }
+function spendingByUnit(amounts: ReadonlyMap<string, SignedAmount>): UsageDashboardMoney[] {
+  return [...amounts]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([unit, amount]) => spendingOf(amount, unit, MONEY_DISPLAY_OPTIONS))
 }
 
-function normalizeCurrency(currency: string): Currency {
-  return (currency || "USD") as Currency
-}
-
-function trimInsignificantZeros(amount: string): string {
-  if (!amount.includes(".")) {
-    return amount
-  }
-
-  return amount.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "")
+/** A quantity at the ledger scale as the number of units it counts. */
+function units(quantity: SignedAmount): number {
+  return Number(formatAmount(quantity))
 }

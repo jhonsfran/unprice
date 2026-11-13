@@ -78,9 +78,9 @@ export const registerSignUpV1 = (app: App) =>
       creditLinePolicy,
       creditLineAmountMinor,
       metadata,
-      sessionId,
+      pageId,
     } = c.req.valid("json")
-    const { billing, customer, subscription, plans } = c.get("services")
+    const { billing, customer, subscription, plans, pages } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -94,10 +94,11 @@ export const registerSignUpV1 = (app: App) =>
           subscriptions: subscription,
           billing,
           plans,
+          pages,
         },
         db: c.get("db"),
         logger: c.get("logger"),
-        analytics: c.get("analytics"),
+        webEvents: c.get("webEvents"),
         waitUntil: c.get("waitUntil"),
       },
       {
@@ -115,7 +116,7 @@ export const registerSignUpV1 = (app: App) =>
           creditLineAmountMinor,
           externalId,
           billingInterval,
-          sessionId,
+          pageId,
           metadata: metadata,
         },
         projectId: key.projectId,

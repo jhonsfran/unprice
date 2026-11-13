@@ -1,5 +1,9 @@
 # SDK Reservation Facade Design
 
+> Superseded by [ADR-0008](../adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md).
+> The `runs.*` and `reservations` SDK APIs and run routes were removed. For current contracts,
+> use [budget handles](../../apps/docs/budgets/sdk.mdx) and the generated OpenAPI spec.
+
 ## Goal
 
 Let an application reserve a developer-defined maximum cost before it starts an expensive operation. The application can then settle actual feature usage or release the reservation.

@@ -46,6 +46,7 @@ export const activationTask = task({
 
     try {
       const activateResult = await context.services.subscriptions.activateWallet({
+        caller: "job",
         subscriptionId,
         projectId,
         now,

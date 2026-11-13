@@ -7,13 +7,12 @@ import {
   inspectBudgetResponseSchema,
   releaseBudgetResponseSchema,
 } from "@unprice/db/validators"
-import { Err, FetchError, Ok, type Result } from "@unprice/error"
-import type { z } from "zod"
+import type { FetchError, Result } from "@unprice/error"
 import { UnPriceBudgetError } from "../../budgets"
+import { InternalApiClient, type InternalApiOptions, errorOf } from "./internal-api-client"
 
 const INSPECT_PATH = "/v1/internal/budgets/inspect"
 const RELEASE_PATH = "/v1/internal/budgets/release"
-const DEFAULT_API_BASE_URL = "https://api.unprice.dev"
 
 /** The dashboard's operator calls on budgets, through the API's internal routes. */
 export interface BudgetOperatorGateway {
@@ -26,8 +25,6 @@ export interface BudgetOperatorGateway {
     input: ReleaseBudgetInternalInput
   ): Promise<Result<ReleaseBudgetResponse, FetchError | UnPriceBudgetError>>
 }
-
-type GatewayFetch = (request: Request) => Promise<Response>
 
 /** Reads the budget's rejection from an answer, or null when the answer is not one. */
 type RejectionOf = (status: number, body: unknown) => UnPriceBudgetError | null
@@ -46,82 +43,18 @@ const releaseRejection: RejectionOf = (status, body) => {
 }
 
 export class HttpBudgetOperatorGateway implements BudgetOperatorGateway {
-  private readonly baseUrl: string
-  private readonly token: string
-  private readonly fetch: GatewayFetch
-
-  constructor(options: { baseUrl?: string; token: string; fetch?: GatewayFetch }) {
-    this.baseUrl = (options.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "")
-    this.token = options.token
-    this.fetch = options.fetch ?? fetch
+  private readonly api: InternalApiClient
+  constructor(options: InternalApiClient | InternalApiOptions) {
+    this.api = options instanceof InternalApiClient ? options : new InternalApiClient(options)
   }
-
   inspect(input: InspectBudgetRequest) {
-    return this.post(INSPECT_PATH, input, inspectBudgetResponseSchema, inspectRejection)
+    return this.api.post(INSPECT_PATH, input, inspectBudgetResponseSchema, {
+      rejectionOf: inspectRejection,
+    })
   }
-
   release(input: ReleaseBudgetInternalInput) {
-    return this.post(RELEASE_PATH, input, releaseBudgetResponseSchema, releaseRejection)
-  }
-
-  private async post<S extends z.ZodTypeAny>(
-    path: string,
-    input: unknown,
-    schema: S,
-    rejectionOf: RejectionOf
-  ): Promise<Result<z.infer<S>, FetchError | UnPriceBudgetError>> {
-    const context = { url: path, method: "POST" }
-    let response: Response
-    let body: unknown
-    try {
-      response = await this.fetch(
-        new Request(`${this.baseUrl}${path}`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
-          body: JSON.stringify(input),
-        })
-      )
-      body = await response.json().catch(() => null)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : `${path} failed`
-      return Err(new FetchError({ message, retry: true, context }))
-    }
-
-    const rejection = rejectionOf(response.status, body)
-    if (rejection) return Err(rejection)
-    if (!response.ok) {
-      return Err(
-        new FetchError({
-          message: errorOf(body)?.message ?? `${path} failed with status ${response.status}`,
-          retry: response.status >= 500,
-          context: { ...context, status: response.status },
-        })
-      )
-    }
-    const parsed = schema.safeParse(body)
-    if (!parsed.success) {
-      return Err(
-        new FetchError({
-          message: `${path} answered an unexpected body: ${parsed.error.message}`,
-          retry: false,
-          context: { ...context, status: response.status },
-        })
-      )
-    }
-    return Ok(parsed.data)
-  }
-}
-
-/** The `error` of the API's error body, `{ error: { code, message, details } }`. */
-function errorOf(body: unknown): { code?: unknown; message?: string; details?: unknown } | null {
-  if (typeof body !== "object" || body === null || !("error" in body)) return null
-  const { error } = body
-  if (typeof error !== "object" || error === null) return null
-  const message =
-    "message" in error && typeof error.message === "string" ? error.message : undefined
-  return {
-    code: "code" in error ? error.code : undefined,
-    message,
-    details: "details" in error ? error.details : undefined,
+    return this.api.post(RELEASE_PATH, input, releaseBudgetResponseSchema, {
+      rejectionOf: releaseRejection,
+    })
   }
 }

@@ -1,27 +1,38 @@
 import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { LEDGER_SCALE } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
+import type { BudgetClient } from "../budgets/budget-client"
+import { meterPayerUsage } from "../budgets/meter-payer-usage"
+import { DEC, NOV, PROJECT_ID, image, payerHarness } from "../budgets/payer-budget.fixture"
 import {
   type GetCustomerCurrentEntitlementsDeps,
   getCustomerCurrentEntitlements,
 } from "./get-current-entitlements"
 
-const now = Date.parse("2026-08-28T10:00:00.000Z")
-const projectId = "proj_123"
+const now = NOV + 3_600_000
+const projectId = PROJECT_ID
 const customerId = "cus_123"
 
 describe("getCustomerCurrentEntitlements", () => {
-  it("returns static allowance and live metered state", async () => {
-    const usage = entitlement({
-      id: "ce_tokens",
-      featureSlug: "tokens",
-      featureTitle: "Total tokens",
+  it("returns static allowance and live metered state from the payer budget", async () => {
+    const h = payerHarness()
+    await h.createPayer(customerId, { imagesLimit: 4 })
+    await meterPayerUsage(h.deps, {
+      verb: "record",
+      receivedAt: now,
+      events: [
+        { projectId, customerId, idempotencyKey: "e1", occurredAt: NOV + 1, ...image("1024") },
+        { projectId, customerId, idempotencyKey: "e2", occurredAt: NOV + 2, ...image("512") },
+      ],
+    })
+    const images = entitlement({
+      id: "ce_images",
+      featureSlug: "images",
+      featureTitle: "Images",
       featureType: "usage",
-      limit: 2_000,
       meterConfig: meterConfig(),
-      unitOfMeasure: "token",
+      unitOfMeasure: "image",
     })
     const flat = entitlement({
       id: "ce_tools",
@@ -32,22 +43,7 @@ describe("getCustomerCurrentEntitlements", () => {
       meterConfig: null,
       unitOfMeasure: "access",
     })
-    const getEnforcementState = vi.fn().mockResolvedValue({
-      isLimitReached: false,
-      limit: 2_000,
-      usage: 1_400,
-      quotaWindow: {
-        periodKey: "month:1785542400000",
-        startAt: Date.parse("2026-08-01T00:00:00.000Z"),
-        endAt: Date.parse("2026-09-01T00:00:00.000Z"),
-      },
-      spending: {
-        currency: "USD",
-        ledgerAmount: 325_000_000,
-        scale: LEDGER_SCALE,
-      },
-    })
-    const deps = makeDeps({ entitlements: [usage, flat], getEnforcementState })
+    const deps = makeDeps({ entitlements: [images, flat], budgets: h.budgets })
 
     const result = await getCustomerCurrentEntitlements(deps, { customerId, projectId })
 
@@ -56,19 +52,21 @@ describe("getCustomerCurrentEntitlements", () => {
       customerId,
       generatedAt: now,
       entitlements: [
-        expect.objectContaining({
+        {
+          id: "ce_images",
+          featureSlug: "images",
+          featureTitle: "Images",
+          featureType: "usage",
+          unitOfMeasure: "image",
+          grantCount: 1,
           status: "available",
-          id: "ce_tokens",
           allowed: true,
-          usage: 1_400,
-          usagePercent: 70,
-          spending: {
-            currency: "USD",
-            displayAmount: "$3.25",
-            ledgerAmount: 325_000_000,
-            scale: LEDGER_SCALE,
-          },
-        }),
+          limit: 4,
+          usage: 2,
+          usagePercent: 50,
+          quotaWindow: { periodKey: "images:month", startAt: NOV, endAt: DEC },
+          spending: { unit: "money:USD", amount: "0.058" },
+        },
         expect.objectContaining({
           status: "available",
           id: "ce_tools",
@@ -77,79 +75,119 @@ describe("getCustomerCurrentEntitlements", () => {
         }),
       ],
     })
-    expect(getEnforcementState).toHaveBeenCalledTimes(1)
   })
 
-  it("keeps successful rows when one durable object read fails", async () => {
-    const first = entitlement({
-      id: "ce_first",
-      featureSlug: "first",
-      featureTitle: "First",
-      featureType: "usage",
-      meterConfig: meterConfig(),
+  it("reports billing-period usage when the metered feature has no limit", async () => {
+    const h = payerHarness()
+    await h.createPayer(customerId)
+    await meterPayerUsage(h.deps, {
+      verb: "record",
+      receivedAt: now,
+      events: [
+        { projectId, customerId, idempotencyKey: "e1", occurredAt: NOV + 1, ...image("512") },
+      ],
     })
-    const second = entitlement({
-      id: "ce_second",
-      featureSlug: "second",
-      featureTitle: "Second",
-      featureType: "usage",
-      meterConfig: meterConfig(),
-    })
-    const logger: Pick<Logger, "error"> = { error: vi.fn() }
     const deps = makeDeps({
-      entitlements: [first, second],
-      logger,
-      getEnforcementState: vi
-        .fn()
-        .mockResolvedValueOnce({
-          isLimitReached: false,
-          limit: null,
-          usage: 4,
-          quotaWindow: null,
-          spending: { currency: "USD", ledgerAmount: 0, scale: LEDGER_SCALE },
-        })
-        .mockRejectedValueOnce(new Error("DO unavailable")),
+      entitlements: [
+        entitlement({
+          id: "ce_images",
+          featureSlug: "images",
+          featureTitle: "Images",
+          featureType: "usage",
+          meterConfig: meterConfig(),
+        }),
+      ],
+      budgets: h.budgets,
     })
 
     const result = await getCustomerCurrentEntitlements(deps, { customerId, projectId })
 
-    expect(result.err).toBeUndefined()
     expect(result.val?.entitlements).toEqual([
-      expect.objectContaining({ id: "ce_first", status: "available", usage: 4 }),
-      expect.objectContaining({ id: "ce_second", status: "unavailable" }),
+      expect.objectContaining({
+        status: "available",
+        limit: null,
+        usage: 1,
+        usagePercent: null,
+        quotaWindow: { periodKey: "bp_nov", startAt: NOV, endAt: DEC },
+      }),
+    ])
+  })
+
+  it("marks metered rows unavailable when the payer budget read fails", async () => {
+    const logger: Pick<Logger, "error"> = { error: vi.fn() }
+    const budgets: Pick<BudgetClient, "execute"> = {
+      execute: vi.fn().mockRejectedValue(new Error("DO unavailable")),
+    }
+    const deps = makeDeps({
+      entitlements: [
+        entitlement({
+          id: "ce_first",
+          featureSlug: "first",
+          featureTitle: "First",
+          featureType: "usage",
+          meterConfig: meterConfig(),
+        }),
+      ],
+      budgets,
+      logger,
+    })
+
+    const result = await getCustomerCurrentEntitlements(deps, { customerId, projectId })
+
+    expect(result.val?.entitlements).toEqual([
+      expect.objectContaining({ id: "ce_first", status: "unavailable" }),
     ])
     expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({
-        context: "current entitlement durable object read failed",
+        context: "payer budget read failed",
         customer_id: customerId,
         project_id: projectId,
-        customer_entitlement_id: "ce_second",
       })
     )
   })
 
-  it("does not hide invalid durable object state as an unavailable read", async () => {
-    const metered = entitlement({
-      id: "ce_tokens",
-      featureSlug: "tokens",
-      featureTitle: "Tokens",
-      featureType: "usage",
-      meterConfig: meterConfig(),
-    })
+  it("marks metered rows unavailable, without an error, before billing creates the budget", async () => {
+    const h = payerHarness()
     const deps = makeDeps({
-      entitlements: [metered],
-      getEnforcementState: vi.fn().mockResolvedValue({
-        isLimitReached: false,
-        limit: null,
-        usage: 4,
-        quotaWindow: null,
-        spending: { currency: "invalid", ledgerAmount: 0, scale: LEDGER_SCALE },
-      }),
+      entitlements: [
+        entitlement({
+          id: "ce_first",
+          featureSlug: "first",
+          featureTitle: "First",
+          featureType: "usage",
+          meterConfig: meterConfig(),
+        }),
+      ],
+      budgets: h.budgets,
     })
 
-    await expect(getCustomerCurrentEntitlements(deps, { customerId, projectId })).rejects.toThrow()
+    const result = await getCustomerCurrentEntitlements(deps, { customerId, projectId })
+
+    expect(result.val?.entitlements).toEqual([
+      expect.objectContaining({ id: "ce_first", status: "unavailable" }),
+    ])
     expect(deps.logger.error).not.toHaveBeenCalled()
+  })
+
+  it("reads entitlements and the payer budget independently", async () => {
+    const execute = vi.fn()
+    const deps = makeDeps({
+      entitlements: [
+        entitlement({
+          id: "ce_tools",
+          featureSlug: "tools",
+          featureTitle: "Tools",
+          featureType: "flat",
+          meterConfig: null,
+        }),
+      ],
+      budgets: { execute },
+    })
+
+    await getCustomerCurrentEntitlements(deps, { customerId, projectId })
+
+    expect(execute).toHaveBeenCalledTimes(2)
   })
 
   it("returns the entitlement query failure", async () => {
@@ -166,29 +204,17 @@ function makeDeps(
   options: {
     entitlements?: CustomerEntitlementExtended[]
     entitlementResult?: { err: FetchError }
-    getEnforcementState?: ReturnType<typeof vi.fn>
+    budgets?: Pick<BudgetClient, "execute">
     logger?: Pick<Logger, "error">
   } = {}
 ): GetCustomerCurrentEntitlementsDeps {
-  const getEnforcementState =
-    options.getEnforcementState ??
-    vi.fn().mockResolvedValue({
-      isLimitReached: false,
-      limit: null,
-      usage: 0,
-      quotaWindow: null,
-      spending: { currency: "USD", ledgerAmount: 0, scale: LEDGER_SCALE },
-    })
-
   return {
     entitlements: {
       getCustomerEntitlementsForCustomer: vi
         .fn()
         .mockResolvedValue(options.entitlementResult ?? Ok(options.entitlements ?? [])),
     },
-    entitlementWindowClient: {
-      getEntitlementWindowStub: vi.fn().mockReturnValue({ getEnforcementState }),
-    },
+    budgets: options.budgets ?? payerHarness().budgets,
     logger: options.logger ?? { error: vi.fn() },
     now: () => now,
   }
@@ -219,6 +245,7 @@ function entitlement(options: {
     updatedAtM: now - 1_000,
     subscriptionPhase: { creditLinePolicy: "uncapped" },
     featurePlanVersion: {
+      included: null,
       id: `fpv_${options.featureSlug}`,
       projectId,
       planVersionId: "pv_123",
@@ -226,14 +253,6 @@ function entitlement(options: {
       featureType: options.featureType,
       config: {
         usageMode: "unit",
-        price: {
-          dinero: {
-            amount: 0,
-            currency: { code: "USD", base: 10, exponent: 2 },
-            scale: 2,
-          },
-          displayAmount: "0.00",
-        },
       },
       limit: options.limit ?? null,
       meterConfig: options.meterConfig,
@@ -292,7 +311,7 @@ function entitlement(options: {
 function meterConfig() {
   return {
     eventId: "evt_usage",
-    eventSlug: "usage.recorded",
+    eventSlug: "image.generated",
     aggregationMethod: "sum" as const,
     aggregationField: "amount",
   }

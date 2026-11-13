@@ -15,7 +15,7 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Customers"
-          description="Customers are the economic actors that hold subscriptions, wallet credits, invoices, and budgeted runs."
+          description="Customers are the economic actors that hold subscriptions, wallet credits, and invoices."
           action={
             <CustomerDialog>
               <Button>Create Customer</Button>
@@ -32,15 +32,12 @@ export default function Loading() {
           <TabNavigationLink asChild>
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
-          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">
         <SectionIntro
           title="Customer money state"
-          description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, invoices, and runs."
+          description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, and invoices."
         />
         <DataTableSkeleton
           columnCount={8}

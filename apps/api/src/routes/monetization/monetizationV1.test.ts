@@ -7,7 +7,7 @@ import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { handleError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
-import { registerIngestEventsSyncV1 } from "~/routes/events/ingestEventsSyncV1"
+import { registerConsumeUsageV1 } from "~/routes/usage/consumeUsageV1"
 import { route as applyRoute, registerApplyMonetizationV1 } from "./applyMonetizationV1"
 import { route as getRoute, registerGetMonetizationV1 } from "./getMonetizationV1"
 
@@ -26,6 +26,22 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
   }
 })
 
+// usage.consume charges the customer's payer budget; the budget always admits it here.
+vi.mock("~/ingestion/budget/client", () => ({
+  CloudflareBudgetClient: class {
+    execute = vi.fn().mockResolvedValue(
+      Ok({
+        type: "charge",
+        usage: { amount: BigInt(0) },
+        crossed: [],
+        replayed: false,
+        balance: { remaining: null, held: { amount: BigInt(0) }, limits: [], asOf: 0 },
+        created: null,
+      })
+    )
+  },
+}))
+
 const INTEGRATION_CONTRACT = {
   defaultPlan: { slug: "free", planVersionId: "pv_free", note: "default" },
   events: [],
@@ -37,7 +53,6 @@ const INTEGRATION_CONTRACT = {
 const consumeBody = {
   idempotencyKey: "idem_1",
   eventSlug: "chat_request",
-  featureSlug: "chat-messages",
   customerId: "cus_test",
   properties: {},
 }
@@ -130,13 +145,9 @@ function createHarness(
       plans: {},
       features: {},
       events: {},
-      ingestion: {
-        ingestFeatureSync: vi.fn().mockResolvedValue({
-          allowed: true,
-          state: "processed",
-          idempotencyStatus: "new",
-        }),
-      },
+      budgetCatalog: { record: vi.fn() },
+      rateCards: {},
+      wallet: {},
     } as never)
 
     await next()
@@ -144,7 +155,7 @@ function createHarness(
 
   registerApplyMonetizationV1(app)
   registerGetMonetizationV1(app)
-  registerIngestEventsSyncV1(app)
+  registerConsumeUsageV1(app)
 
   return {
     fetch: ({ path, method, body }) =>

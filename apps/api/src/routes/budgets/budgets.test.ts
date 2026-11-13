@@ -57,7 +57,13 @@ describe("budgets API", () => {
   })
 
   it("returns settlement maximum and actual on an over-reservation conflict", async () => {
-    rejectWith({ code: "HOLD_AMOUNT_EXCEEDED", holdId: "h_1", maximum: usd(10), actual: usd(11) })
+    rejectWith({
+      code: "HOLD_AMOUNT_EXCEEDED",
+      holdId: "h_1",
+      measure: { type: "amount" },
+      maximum: usd(10),
+      actual: usd(11),
+    })
     const response = await call("/v1/budgets/settle", { key: "k", holdId: "h_1", amount: "11" })
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual(
@@ -144,7 +150,31 @@ describe("budgets API", () => {
     expect(mocks.keyAuth).toHaveBeenCalledWith(expect.anything(), {
       requireType: ["runtime", "config"],
     })
-    expect(mocks.execute.mock.calls[0]?.[1]).toMatchObject({ type: "upsert", mayLoosen })
+    expect(mocks.execute.mock.calls[0]?.[1]).toMatchObject({
+      type: "upsert",
+      mayLoosen,
+    })
+    expect(mocks.execute.mock.calls[0]?.[1]).not.toHaveProperty("setsPricing")
+  })
+
+  it("refuses to create or upsert a key Unprice writes, and still runs a verb on one", async () => {
+    mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", type: "config" })
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+    const key = "unprice:customer:cus_acme"
+    const ifMissing = { unit: "USD", limits: [] }
+
+    const refused = await Promise.all([
+      call("/v1/budgets/upsert", { key, unit: "USD", limits: [] }),
+      call("/v1/budgets/charge", { key, amount: "0", idempotencyKey: "c0", ifMissing }),
+      call("/v1/budgets/authorize", { key, amount: "1", idempotencyKey: "a0", ifMissing }),
+      call("/v1/budgets/lease", { key, leaseKey: "l0", amount: "1", ttlMs: 60_000, ifMissing }),
+    ])
+
+    expect(refused.map((response) => response.status)).toEqual([403, 403, 403, 403])
+    expect(mocks.execute).not.toHaveBeenCalled()
+    await call("/v1/budgets/charge", { key, amount: "1", idempotencyKey: "c1" })
+    await call("/v1/budgets/upsert", { key: "customer:cus_acme", unit: "USD", limits: [] })
+    expect(mocks.execute).toHaveBeenCalledTimes(2)
   })
 
   it("authenticates every other verb with a runtime key only", async () => {
@@ -154,6 +184,37 @@ describe("budgets API", () => {
 
     expect(mocks.keyAuth).toHaveBeenCalledWith(expect.anything())
   })
+
+  it("stops a customer-bound key before it reads or mutates another payer budget", async () => {
+    mocks.keyAuth.mockResolvedValue({
+      id: "key_1",
+      projectId: "proj_123",
+      defaultCustomerId: "cus_a",
+    })
+    const responses = await Promise.all([
+      call("/v1/budgets/get?key=unprice:customer:cus_b"),
+      call("/v1/budgets/release", { key: "unprice:customer:cus_b", holdId: "h_1" }),
+    ])
+
+    expect(responses.map((response) => response.status)).toEqual([403, 403])
+    expect(mocks.execute).not.toHaveBeenCalled()
+  })
+
+  it.each(["cus_a", null])(
+    "allows the payer's own or an unbound key (%s)",
+    async (defaultCustomerId) => {
+      mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", defaultCustomerId })
+      rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+      const response = await call("/v1/budgets/get?key=unprice:customer:cus_a")
+
+      expect(response.status).toBe(404)
+      expect(mocks.execute.mock.calls[0]?.[0]).toEqual({
+        projectId: "proj_123",
+        key: "unprice:customer:cus_a",
+      })
+    }
+  )
 
   it("returns 403 naming the config key when a runtime key loosens a budget", async () => {
     rejectWith({
@@ -193,7 +254,7 @@ describe("budgets API", () => {
       Ok({
         type: "authorize",
         holdId: "h_1",
-        amount: usd(10),
+        reserved: { amount: usd(10), quantities: {} },
         expiresAt: 1_796_084_100_000,
         replayed: false,
         created: null,
@@ -209,7 +270,12 @@ describe("budgets API", () => {
 
     expect(mocks.execute).toHaveBeenCalledWith(
       { projectId: "proj_123", key: "customer:acme/run:1" },
-      { type: "authorize", idempotencyKey: "a1", ttlMs: undefined, amount: usd(10) }
+      {
+        type: "authorize",
+        idempotencyKey: "a1",
+        ttlMs: undefined,
+        usage: { amount: usd(10), quantities: {} },
+      }
     )
     expect(response.status).toBe(200)
     expect(response.headers.get("Unprice-Budget-Remaining")).toBe("40")
@@ -245,7 +311,7 @@ describe("budgets API", () => {
       Ok({
         type: "authorize",
         holdId: "h_1",
-        amount: usd(10),
+        reserved: { amount: usd(10), quantities: {} },
         expiresAt: 1_796_084_100_000,
         replayed: false,
         created: null,
@@ -292,6 +358,26 @@ describe("budgets API", () => {
     expect(mocks.log).toHaveBeenLastCalledWith({
       budget: { command: "get", outcome: "error", do_ms: expect.any(Number) },
     })
+  })
+
+  it("returns 402 when the payer's wallet cannot fund a charge", async () => {
+    rejectWith({
+      code: "WALLET_EMPTY",
+      statementKey: "inv_nov",
+      required: usd(1),
+      available: BigInt(0),
+    })
+
+    const response = await call("/v1/budgets/charge", {
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "c1",
+    })
+
+    expect(response.status).toBe(402)
+    expect(await response.json()).toEqual(
+      errorBody("BUDGET_EXCEEDED", "The wallet cannot fund 1 more usage on this budget")
+    )
   })
 
   it("returns 402 with the blocking limit when a charge does not fit", async () => {
@@ -422,7 +508,7 @@ describe("budgets API", () => {
         type: "record",
         idempotencyKey: "r1",
         occurredAt: 1_796_083_200_000,
-        amount: usd(1),
+        usage: { amount: usd(1), quantities: {} },
       }
     )
   })
@@ -436,7 +522,16 @@ describe("budgets API", () => {
           key: "customer:acme",
           unit: "money:USD",
           version: 2,
-          limits: [{ id: "billing", amount: usd(50), window: "month", anchor, enforce: "hard" }],
+          limits: [
+            {
+              id: "billing",
+              amount: usd(50),
+              window: "month",
+              anchor,
+              enforce: "hard",
+              measure: { type: "amount" },
+            },
+          ],
           holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
           onUnavailable: "deny",
           closesAt: 1_798_761_600_000,
@@ -449,7 +544,7 @@ describe("budgets API", () => {
             windowId: "month@2026-10-15T00:00:00.000Z",
             start: Date.parse("2026-09-15T00:00:00.000Z"),
             end: anchor,
-            consumed: usd(12),
+            consumed: { amount: usd(12), quantities: {} },
           },
         ],
       })

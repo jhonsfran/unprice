@@ -5,9 +5,8 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import type { ServiceContext } from "../../context"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -99,17 +98,15 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
-    })
-    const rating = new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
 
-    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const activationInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: testInvoicing({ db }).rateCards },
+      { projectId, subscriptionId }
+    )
     expect(activationInputs).toEqual({
       creditLinePolicy: "capped",
       grants: [{ amount: usageAmount, reason: "Period usage allowance", source: "credit_line" }],
@@ -238,21 +235,19 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
 
@@ -273,13 +268,8 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
-    })
-    const rating = new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
     const services = {
@@ -365,21 +355,19 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
 
@@ -411,13 +399,8 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
-    })
-    const rating = new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
     const services = {
@@ -428,7 +411,10 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     // Derivation reads the plan config: included credits first, then the
     // credit-line runway derived from finite usage limits.
-    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const activationInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: testInvoicing({ db }).rateCards },
+      { projectId, subscriptionId }
+    )
     expect(activationInputs).toEqual({
       creditLinePolicy: "capped",
       grants: [
@@ -528,12 +514,11 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     expect(firstRun.phasesProcessed).toBe(1)
@@ -574,7 +559,10 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     ])
 
     // The next period re-issues the plan's included credit fresh.
-    const renewalInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const renewalInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: testInvoicing({ db }).rateCards },
+      { projectId, subscriptionId }
+    )
     const renewal = await activateSubscription(
       { services, db, logger },
       {
@@ -604,17 +592,12 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     })
   })
 
-  it("P0-B calls reservationFlushGateway before invoicing when provided", async () => {
+  it("P0-B seals the payer budget statements before invoicing", async () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
-    })
-    const rating = new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
     const services = {
@@ -675,24 +658,21 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       },
     })
 
-    // Use a fake gateway that confirms it was called
-    vi.spyOn(reservationFlushGateway, "flushForInvoicing")
+    // The invoice seals the payer budget's statements of its key before it bills them.
+    vi.spyOn(payerBudgets, "seal")
 
     const context = await loadSubscriptionContext()
     const result = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
 
     expect(result.phasesProcessed).toBe(1)
-    expect(reservationFlushGateway.flushForInvoicing).toHaveBeenCalledWith(
-      expect.objectContaining({ statementKey })
-    )
+    expect(payerBudgets.seal).toHaveBeenCalledWith(expect.objectContaining({ statementKey }))
   })
 })
 

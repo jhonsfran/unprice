@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { hashStringSHA256 } from "@unprice/db/utils"
 import {
@@ -27,21 +26,21 @@ import {
   providerStatusToInvoiceEvent,
   transitionInvoiceStatus,
 } from "../payment-provider/invoice-state-machine"
-import type { RatingService } from "../rating/service"
-import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
-import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
+import { billPeriod } from "../use-cases/billing/bill-period"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
+import {
+  type PayerBudgetSyncCaller,
+  syncPayerBudgetWithRetry,
+} from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
+import type { InvoicingPorts } from "./invoicing-ports"
 import type { UpdateInvoiceInput } from "./repository"
 import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
-import { billingUsageRegistrationSchema, ownsBillingUsagePeriod } from "./usage-snapshot"
-
-type ComputeCurrentUsageResult = RatedCharge
 
 export interface InvoiceStatementLine {
   entryId: string
@@ -342,58 +341,94 @@ function isProviderInvoiceNotFound(error: { message: string; context?: Record<st
 export class BillingService {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
-  private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService
-  private readonly reservationFlushGateway: BillingReservationFlushGateway
+  private readonly invoicing: InvoicingPorts
 
   constructor({
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
     customerService,
     grantsManager,
-    ratingService,
     ledgerService,
     walletService,
-    reservationFlushGateway,
+    invoicing,
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
     customerService: CustomerService
     grantsManager: GrantsManager
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    /** The payer budget (ADR-0008 D1; null where none is reached) and the plan rate cards. */
+    invoicing: InvoicingPorts
   }) {
     this.db = db
     this.logger = logger
-    this.analytics = analytics
     this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = customerService
     this.grantsManager = grantsManager
-    this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
-    this.reservationFlushGateway = reservationFlushGateway
+    this.invoicing = invoicing
+  }
+
+  /**
+   * Compiles the customer's subscription into its payer budget and registers its statements.
+   * Never fails the caller: a failure is logged at error level and the next billing job, which
+   * syncs again, retries it. Call it after the subscription change committed, outside any lock.
+   * A request syncs once; a job waits out open holds that refuse a pricing change.
+   */
+  public async syncPayerBudget(input: {
+    projectId: string
+    customerId: string
+    caller: PayerBudgetSyncCaller
+  }): Promise<void> {
+    const { payerBudgets } = this.invoicing
+    const { caller, ...target } = input
+    const synced = await syncPayerBudgetWithRetry(payerBudgets, target, { caller })
+    if (synced.err) {
+      this.logger.error(synced.err, { context: "payer budget sync failed", ...input })
+    } else if (synced.val.status === "reservations_open") {
+      this.logger.warn(
+        "payer budget pricing change waits for open holds; the next sync applies it",
+        {
+          ...input,
+        }
+      )
+    }
+  }
+
+  /** `syncPayerBudget` for the customer of a subscription. */
+  public async syncSubscriptionPayerBudget(input: {
+    projectId: string
+    subscriptionId: string
+    caller: PayerBudgetSyncCaller
+  }): Promise<void> {
+    const { projectId, subscriptionId, caller } = input
+    const subscription = await this.db.query.subscriptions.findFirst({
+      columns: { customerId: true },
+      where: (row, ops) =>
+        ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+    })
+    if (subscription) {
+      await this.syncPayerBudget({ projectId, customerId: subscription.customerId, caller })
+    }
   }
 
   private setLockContext(context: {
@@ -410,6 +445,7 @@ export class BillingService {
     subscriptionId: string
     projectId: string
     now: number
+    caller: PayerBudgetSyncCaller
     lock?: boolean
     ttlMs?: number
     db?: Database
@@ -419,21 +455,27 @@ export class BillingService {
     const trx = args.db ?? this.db
 
     try {
-      return await withLockedMachine({
+      const result = await withLockedMachine({
         ...args,
         db: trx,
         repo: new DrizzleSubscriptionRepository(trx),
         logger: this.logger,
-        analytics: this.analytics,
         customer: this.customerService,
-        ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
         billingService: this,
-        reservationFlushGateway: this.reservationFlushGateway,
+        invoicing: this.invoicing,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
+      if (!args.db && !args.dryRun && args.lock !== false) {
+        await this.syncSubscriptionPayerBudget({
+          projectId: args.projectId,
+          subscriptionId: args.subscriptionId,
+          caller: args.caller,
+        })
+      }
+      return result
     } catch (e) {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
         throw new UnPriceBillingError({
@@ -458,6 +500,7 @@ export class BillingService {
     db,
     dryRun = false,
     lock,
+    caller = "request",
   }: {
     subscriptionId: string
     projectId: string
@@ -465,9 +508,12 @@ export class BillingService {
     db?: Database
     dryRun?: boolean
     lock?: boolean
+    /** Who syncs the payer budget after new periods: the period job waits out open holds. */
+    caller?: PayerBudgetSyncCaller
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -493,16 +539,80 @@ export class BillingService {
     }
   }
 
+  /**
+   * Invoices what a canceled or expired subscription still owes: its last periods, capped where it
+   * ended, and the payer budget statements sealed at that time (ADR-0008 D4). Both are final machine
+   * states that take no more events, so the invoicing job runs `billPeriod` under the subscription
+   * lock directly, with the usual late-event grace.
+   */
+  public async invoiceEndedSubscription(input: {
+    projectId: string
+    subscriptionId: string
+    now: number
+    caller?: PayerBudgetSyncCaller
+  }): Promise<Result<{ phasesProcessed: number }, UnPriceBillingError>> {
+    const { projectId, subscriptionId, now, caller = "request" } = input
+    try {
+      const phasesProcessed = await this.withSubscriptionMachine({
+        caller,
+        subscriptionId,
+        projectId,
+        now,
+        lock: true,
+        run: async () => {
+          const subscription = await this.db.query.subscriptions.findFirst({
+            where: (row, ops) =>
+              ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+            with: { customer: true },
+          })
+          if (!subscription) {
+            throw new UnPriceBillingError({
+              code: "SUBSCRIPTION_NOT_FOUND",
+              message: "Subscription not found",
+            })
+          }
+          if (subscription.status !== "canceled" && subscription.status !== "expired") {
+            throw new UnPriceBillingError({
+              code: "BILLING_OPERATION_FAILED",
+              message: "Only a canceled or expired subscription is invoiced outside its machine",
+            })
+          }
+          const { customer, ...row } = subscription
+          const billed = await billPeriod({
+            context: { now, subscription: row, customer },
+            logger: this.logger,
+            db: this.db,
+            repo: new DrizzleSubscriptionRepository(this.db),
+            ledgerService: this.ledgerService,
+            invoicing: this.invoicing,
+          })
+          return billed.phasesProcessed
+        },
+      })
+      return Ok({ phasesProcessed })
+    } catch (error) {
+      if (error instanceof UnPriceBillingError) return Err(error)
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: error instanceof Error ? error.message : "Final invoicing failed",
+        })
+      )
+    }
+  }
+
   public async billingInvoice({
     projectId,
     subscriptionId,
     invoiceId,
     now = Date.now(),
+    caller = "request",
   }: {
     projectId: string
     subscriptionId: string
     invoiceId: string
     now?: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<
     Result<
       {
@@ -514,6 +624,7 @@ export class BillingService {
   > {
     try {
       const res = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -548,11 +659,13 @@ export class BillingService {
     subscriptionId,
     invoiceId,
     now = Date.now(),
+    caller = "request",
   }: {
     projectId: string
     subscriptionId: string
     invoiceId: string
     now?: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<
     Result<
       {
@@ -565,6 +678,7 @@ export class BillingService {
   > {
     try {
       const res = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -1280,11 +1394,13 @@ export class BillingService {
     subscriptionId,
     invoiceId,
     now = Date.now(),
+    caller = "request",
   }: {
     projectId: string
     subscriptionId: string
     invoiceId: string
     now?: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<
     Result<
       {
@@ -1321,6 +1437,7 @@ export class BillingService {
       }
 
       const res = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -2056,52 +2173,6 @@ export class BillingService {
             // 4. Batch insert billing periods for this item
             if (billingPeriodValues.length > 0) {
               if (!dryRun) {
-                if (item.featurePlanVersion.featureType === "usage") {
-                  const entitlements = await tx.query.customerEntitlements.findMany({
-                    where: (table, { and, eq }) =>
-                      and(
-                        eq(table.projectId, phase.projectId),
-                        eq(table.subscriptionId, phase.subscriptionId),
-                        eq(table.subscriptionPhaseId, phase.id),
-                        eq(table.subscriptionItemId, item.id)
-                      ),
-                  })
-                  if (entitlements.length === 0)
-                    throw new Error(`No entitlement owns new billing periods for item ${item.id}`)
-                  const registrations = billingPeriodValues.flatMap((period) => {
-                    const owners = entitlements.filter((entitlement) =>
-                      ownsBillingUsagePeriod(entitlement, period)
-                    )
-                    if (owners.length === 0)
-                      throw new Error(`No entitlement owns new billing period ${period.id}`)
-                    return owners.map((entitlement) => {
-                      return billingUsageRegistrationSchema.parse({
-                        projectId: period.projectId,
-                        customerId: period.customerId,
-                        customerEntitlementId: entitlement.id,
-                        subscriptionId: period.subscriptionId,
-                        subscriptionPhaseId: period.subscriptionPhaseId,
-                        subscriptionItemId: item.id,
-                        billingPeriodId: period.id,
-                        statementKey: period.statementKey,
-                        featureSlug: item.featurePlanVersion.feature.slug,
-                        cycleStartAt: period.cycleStartAt,
-                        cycleEndAt: period.cycleEndAt,
-                        currency: phase.planVersion.currency,
-                        amountScale: 8,
-                        origin: "period_generation_v1",
-                        registeredAt: now,
-                      })
-                    })
-                  })
-                  const registered = await this.reservationFlushGateway.registerPeriods({
-                    projectId: phase.projectId,
-                    customerId: phase.subscription.customerId,
-                    subscriptionId: phase.subscriptionId,
-                    registrations,
-                  })
-                  if (registered.err) throw registered.err
-                }
                 await txBillingRepo.createPeriodsBatch({
                   periods: billingPeriodValues,
                 })
@@ -2131,20 +2202,6 @@ export class BillingService {
       })
 
     return result
-  }
-
-  public async calculateFeaturePrice(
-    params: RatingInput
-  ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    const result = await this.ratingService.rateBillingPeriod(params)
-    return result.err
-      ? Err(
-          new UnPriceBillingError({
-            code: "BILLING_OPERATION_FAILED",
-            message: result.err.message,
-          })
-        )
-      : Ok(result.val)
   }
 
   public async getInvoiceStatementLines({
@@ -2364,27 +2421,6 @@ export class BillingService {
 
     const unearnedFraction = 1 - newFactor / oldFactor
     return Ok(Math.floor(paidMinor * unearnedFraction))
-  }
-
-  public async estimatePriceCurrentUsage({
-    customerId,
-    projectId,
-    now = Date.now(),
-    usageOverrides,
-  }: {
-    customerId: string
-    projectId: string
-    now?: number
-    usageOverrides?: Map<string, number>
-  }): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    this.logger.warn("estimatePriceCurrentUsage is pending customer-entitlement billing rewrite", {
-      customerId,
-      projectId,
-      now,
-      hasUsageOverrides: Boolean(usageOverrides?.size),
-    })
-
-    return Ok([])
   }
 
   // all variables that affect the invoice should be included in the statement key

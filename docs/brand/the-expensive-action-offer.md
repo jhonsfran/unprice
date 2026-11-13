@@ -15,7 +15,7 @@ today (via Stripe Connect to the buyer's own account, or bring-your-own-key) plu
 **Sandbox** test provider; do not claim Square (an unimplemented placeholder) or live
 Paddle/Lemon Squeezy. Hosting: say "run it in your own Cloudflare account," not unqualified
 "self-host" — the runtime requires the buyer's own Cloudflare account (Workers, Durable Objects,
-Queues). Lead with the customer money path, not cold category language.
+Pipelines). Lead with the customer money path, not cold category language.
 
 ---
 
@@ -69,7 +69,7 @@ Every line of the offer is engineered to push the two numerators up and the two 
 | **Dream Outcome** | Maximize | **Customer spend control with proof**: *"The paid action is allowed before cost is created, and the invoice line can defend itself after."* The win is emotional as much as technical: no surprise margin leak, no support panic, no founding engineer spending Friday reconstructing why a customer was charged. |
 | **Perceived Likelihood** | Maximize | Shrink the promise to one plan version, one paid action, one shadow authorization path, one evidence trail. Back it with a workflow-app demo video that shows the exact path: create the plan, install the SDK, run `access.check` in shadow, simulate on Sandbox, then inspect the invoice evidence. The core is **open source** — they can read the money-path code before trusting it. Start small, prove it, expand. |
 | **Time Delay** | Minimize | **One paid action in one afternoon.** No full billing migration, no payment-provider move, and no production enforcement to start. Define one plan version, provision or map one customer with `signUp`, install the SDK, and place a read-only shadow check beside the existing logic. |
-| **Effort & Sacrifice** | Minimize | Adopt in **shadow** first: `access.check` mutates nothing and `usage.record` is non-blocking, so production behavior stays unchanged while you compare decisions. You don't hand-build subscription or entitlement tables — `signUp` provisions them from the plan version. When you go live, connect **your own** Stripe account (Stripe Connect or your own key); Unprice never sits in your funds flow. Generated SDK, explicit schemas, no black box. |
+| **Effort & Sacrifice** | Minimize | Adopt in **shadow** first: `access.check` mutates nothing and `usage.record` reports past usage without a limit gate, so production behavior stays unchanged while you compare decisions. You don't hand-build subscription or entitlement tables — `signUp` provisions them from the plan version. When you go live, connect **your own** Stripe account (Stripe Connect or your own key); Unprice never sits in your funds flow. Generated SDK, explicit schemas, no black box. |
 
 The strategic result: the *value* (protected margin, fewer invoice disputes, eliminated DIY build,
 and safer pricing changes) is large and the *price* (one afternoon, one plan version, one SDK path
@@ -120,17 +120,17 @@ Four runtime operations — and the difference is the product. Don't conflate th
 | Operation | Sync? | Blocks over-budget? | Mutates | Use it to |
 | --- | --- | --- | --- | --- |
 | `access.check` | sync | — (read-only) | nothing | Pre-flight: ask "is this customer commercially allowed?" before doing the work. Safe to call anywhere, including in shadow. |
-| `usage.record` | **async** | **No** | meter (eventual, non-enforcing) | **Report** usage for metering and invoice evidence. Usage *can* exceed funds — it is fire-and-forget, not a gate. |
-| `usage.consume` | **sync** | **Yes** | meter (real-time, enforcing) | **Enforce** in the request path: validate in real time and deny (`LIMIT_EXCEEDED`) the moment funds/limit run out. |
-| `runs.start` / `consume` / `end` | sync | **Yes, up front** | wallet reservation | **Reserve** a budget envelope *before* a multi-step workload runs, so it cannot overspend. `start` holds the funds, `consume` draws down, `end` releases the remainder. |
+| `usage.record` | sync | No limit gate | payer usage | Report past usage in an `events` batch with `occurredAt`. Inspect each accepted or rejected result. Accepted usage applies before the response and can exceed limits. |
+| `usage.consume` | **sync** | **Yes** | meter (real-time, enforcing) | **Enforce** in the request path: validate in real time and deny with HTTP 402 `BUDGET_EXCEEDED` the moment funds/limit run out. |
+| `budget(key).authorize` / `hold.settle` | sync | Yes, up front | standalone budget holds | Reserve capacity before work and settle actual usage within the hold. Your app enforces the maximum. Standalone keys do not fund a customer wallet or create invoice usage. |
 
 The one-line mental model:
 
-- **`record` = "tell me later."** Async, never blocks; usage can overshoot funds.
-- **`consume` = "decide now."** Sync, blocks the moment funds/limit are exhausted.
-- **`runs` = "ring-fence it first."** Reserve the budget before the work starts, so the run is guaranteed not to overspend.
+- `usage.record` reports past usage and returns per-event outcomes. Accepted usage can exceed limits.
+- `usage.consume` gates usage and returns HTTP 402 when funds or hard limits cannot cover it.
+- `budget(key).authorize` holds capacity before work. `hold.settle` consumes the actual amount and returns unused capacity.
 
-Lead the offer with `access.check` / `usage.consume` / `runs` — that is the customer-spend
+Lead the offer with `access.check` / `usage.consume` / `budget(key).authorize` — that is the customer-spend
 authorization wedge. `record` is for metering and invoice evidence, not spend safety.
 
 ## Adopt In Shadow: Don't Touch Your Current Logic
@@ -141,14 +141,14 @@ them enforce anything. You keep your own payment provider and your own logic; Un
 - **Keep your provider and current logic running.** Nothing in production behavior changes.
 - **Mirror the decision in shadow.** Call `access.check` (read-only — it mutates nothing) in parallel
   with your existing checks and log whether Unprice *would* have allowed or denied. Optionally mirror
-  usage with `usage.record` (non-blocking) to compare Unprice's meters against your own numbers.
+  usage with `usage.record` with per-event result checks to compare Unprice's meters against your own numbers.
 - **Compare, then cut over.** Once Unprice's decisions match — or beat — your current logic, switch
-  enforcement to `usage.consume` / `runs.*` and move the provider over to your own Stripe through
+  enforcement to `usage.consume` / `budget(key).authorize` and move the provider over to your own Stripe through
   Unprice.
 
-Because the pre-flight (`access.check`) and reporting (`usage.record`) paths never block your traffic,
-you validate the entire money path against real production usage without risking a single customer
-request — then flip the switch only when the evidence convinces you.
+Keep your existing decision authoritative while you compare `access.check` results. Reporting
+with `usage.record` changes usage and can create invoice evidence, so use a Sandbox customer for
+that comparison and inspect each event result before enabling production billing.
 
 ## Payments: Start On Sandbox, Settle To Your Own Account
 
@@ -181,7 +181,7 @@ commercial pricing is still being defined; do not fabricate a number).
 | 2 | **Explainable invoice evidence** — every charge traces back to the plan version, pricing rule, billing period, rated usage events when present, wallet movement, and ledger captures. | Reconstruct a disputed line by hand from logs. | Senior engineering time turns into invoice forensics; customer trust drops while everyone waits. |
 | 3 | **Auto-provisioned entitlements + runtime metering** — `signUp` derives entitlements from the plan version; check access and consume usage while the request is in flight. | Hand-build a subscriptions + entitlements table and scatter `if (plan === ...)` checks through product code. | Every packaging change feels like touching a live wire: app code, billing scripts, and support rules all move together. |
 | 4 | **Wallets & credits with reservations** — purchased, granted, reserved, and consumed balances kept distinct from entitlement grants. | Conflate credits, grants, and quantities in ad-hoc columns. | Denials you cannot explain; refunds you cannot defend. |
-| 5 | **Budgeted runs** for jobs, workflows, tools, and agents — `runs.start` reserves a budget envelope *before* the work runs (so it cannot overspend), `consume` draws down, `end` releases the remainder. Generic workload labels, no agent registration. | Hand-roll per-run caps and hope the counter wins the race. | Concurrency leaks over-budget work through silently. |
+| 5 | **Budget keys** for jobs, workflows, tools, and agents. `budget(key).authorize` holds capacity before work, `hold.settle` counts actual usage within the maximum, and `closesAt` ends new spending. Your app owns workload identity and execution. | Hand-roll per-run caps and hope the counter wins the race. | Concurrency leaks over-budget work through silently. |
 | 6 | **One inspectable, open money path** — AGPL-3.0 core, explicit schemas, generated SDK. | Trust a black-box billing vendor with your margin logic. | No audit trail; vendor owns your revenue truth. |
 | 7 | **Pricing experiments without moving old customers** — flat, tiered, package, usage, credit-based, and hybrid share one mental model; plan versions keep customers on the pricing they bought. | Rebuild plan logic across app, billing scripts, and cron. | Pricing experiments blocked on engineering tickets or risky migrations. |
 | 8 | **Your payments, your account** — start on the built-in Sandbox (no real processor), then connect your own Stripe via Stripe Connect or your own key. Unprice never sits in your funds flow. | Re-platform billing, or route your revenue through a vendor's account, to change one pricing rule. | Lock-in anxiety on the most critical system you run. |
@@ -208,7 +208,7 @@ shippable from the existing product surface.
   `customers.signUp` (it provisions the subscription + entitlements for you), then guard one action
   with `access.check` — runnable end-to-end on Sandbox before any real processor. *Collapses Time
   Delay.*
-- **Bonus 4 — The Invoice-Evidence Trail.** The replayable event-to-ledger path that lets support
+- **Bonus 4 — The Invoice-Evidence Trail.** The journal event-to-ledger path that lets support
   answer "why was I charged this?" without paging an engineer. *Kills the dispute-cost objection.*
 - **Bonus 5 — The Inspectable Core.** The AGPL-3.0 source for the money path itself — read every line
   that guards your revenue before you depend on it. *Kills the "is it safe / what if you disappear"
@@ -253,7 +253,7 @@ money logic lives) and signals confidence by inviting disqualification.
 > compare its decisions against your live logic without touching a single production request. Model
 > the full money path — customers, plan versions, entitlements, budgets, credits, invoices — on the
 > built-in **Sandbox** provider before a real dollar moves. Then switch enforcement to
-> `usage.consume` / `runs` and connect your **own** Stripe account (Connect or your own key); Unprice
+> `usage.consume` / `budget(key).authorize` and connect your **own** Stripe account (Connect or your own key); Unprice
 > never sits in your funds flow. Validate with zero exposure, cut over only on the evidence, keep
 > full custody of funds.
 
@@ -301,9 +301,9 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 | "Do I have to move my payments to you? Will you touch my money?" | No. Start on the built-in Sandbox provider (no real processor) to test behavior, then connect **your own** Stripe account via Stripe Connect or your own API key. Charges and payouts run on your account; Unprice never sits in your funds flow. |
 | "Do I have to rebuild subscriptions and entitlements?" | No. Define the plan version once; `customers.signUp` provisions the customer, subscription, and entitlements (plus credit grants, billing periods, and wallet) in one call. You don't hand-roll those tables. |
 | "Why separate entitlements from subscriptions?" | Because pricing changes should not silently rewrite the rights a customer already bought. Plan versions let new pricing experiments ship while existing customers stay attached to their versioned entitlement map. |
-| "Will switching disrupt my current billing logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` is non-blocking, so you run Unprice's decisions next to your existing stack and provider, compare, and only cut over to enforcement (`usage.consume` / `runs`) when you trust it. |
-| "What's the difference between record, consume, and runs?" | `usage.record` reports usage asynchronously and never blocks (usage can exceed funds). `usage.consume` validates synchronously and blocks when funds/limit run out. `runs.*` reserves a budget envelope *before* a multi-step workload runs so it cannot overspend. Lead with the operation that matches the paid action: `access.check`, `consume`, or `runs`; record is for metering and evidence. |
-| "Is this an AI agent platform?" | No. Budgeted runs are generic workload labels. Your app still owns prompts, tools, jobs, traces, and execution. Unprice owns the budget, the credit reservation, and the evidence. |
+| "Will switching disrupt my current billing logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` reports past usage without a limit gate, so you run Unprice's decisions next to your existing stack and provider, compare, and only cut over to enforcement (`usage.consume` / `budget(key).authorize`) when you trust it. |
+| "What's the difference between record, consume, and budgets?" | `usage.record` applies reported usage before it returns, with per-event outcomes. `usage.consume` gates usage and returns HTTP 402 `BUDGET_EXCEEDED` on a commercial denial. `budget(key).authorize` holds capacity on a standalone cap before work; settle actual usage within that hold. |
+| "Is this an AI agent platform?" | No. Your app chooses budget keys and still owns prompts, tools, jobs, traces, and execution. Unprice owns each cap, hold, and budget journal. |
 | "Is it safe enough for money decisions?" | The money-path core is open source — audit it before you depend on it. Start with one request path, prove it in shadow and Sandbox, then expand. The adoption sequence is the guarantee, not a promise to trust. |
 | "My pricing is complex — hybrid subscription + usage + credits." | That is the design center: flat, tiered, package, usage, credit-based, and hybrid share one mental model; credits stay distinct from entitlement grants, and plan versions keep experiments contained. |
 | "What if I outgrow it / want to leave?" | You own the code and the data under AGPL-3.0. Version plans and migrate customers without rewriting product code. No lock-in by construction. |
@@ -414,13 +414,14 @@ Avoid vague CTAs like "Start pricing" or "Get started."
   `access.check`," not "one `access.check`." `signUp` is what auto-provisions the subscription and
   entitlements; don't imply entitlements appear without a published plan version that defines the
   feature.
-- Don't conflate the decision endpoints: `usage.record` = async, non-blocking (usage can exceed
-  funds); `usage.consume` = sync, blocks over-limit; `runs.*` = up-front wallet budget reservation;
+- Keep the operation contracts distinct: `usage.record` applies reported usage and returns per-event
+  outcomes; `usage.consume` gates usage with HTTP 402 denials; `budget(key).authorize` holds capacity
+  on a standalone cap;
   `access.check` = read-only pre-flight. Lead commercial-authorization copy with `access.check` /
-  `consume` / `runs` depending on the use case.
-- "Shadow adoption" is accurate because `access.check` is read-only and `usage.record` is
-  non-blocking. Don't sell shadow as a separate product mode or imply it auto-syncs from the buyer's
-  provider — it is running Unprice's decision endpoints in parallel without enforcing.
+  `usage.consume` / `budget(key).authorize` depending on the use case.
+- Shadow adoption means your application keeps its current decision authoritative and compares
+  read-only `access.check` results. `usage.record` changes usage and billing evidence; it is not a
+  shadow mode. Do not imply either call auto-syncs from the buyer's provider.
 - Voice is **calm urgency**: create urgency with the mechanism, not fear adjectives. Avoid "growth
   platform," "magic billing," "effortless," "revenue OS," "no-code pricing."
 - Keep "one afternoon" mechanically honest: back it with a timed, CI-tested quickstart (plan

@@ -15,8 +15,8 @@ denied, or billed.
 
 <Frame caption="The money path: two requests accepted, the third denied.">
   <div className="w-full overflow-x-auto" tabIndex={0} role="region" aria-label="Money path diagram, scroll horizontally on small screens">
-    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
-    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with BUDGET_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with BUDGET_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
   </div>
 </Frame>
 
@@ -43,9 +43,8 @@ units — cents for USD.
 | --- | --- | --- |
 | **Paid action** | Any unit of work that can create cost: an LLM call, API request, export, data job, or workflow step. The generic term. | Not an API object. Nothing is named `paidAction`. |
 | **Agent run** | A paid action executed by an agent. The case Unprice is built around — a kind of paid action, not a different mechanism. | Not a separate API path from any other paid action. |
-| **Run** | The object that carries a budget across one or more steps. Created by `runs.start`; IDs are prefixed `brun_`. | Not your own job ID. Pass that as `workloadId`. |
-| **Reservation** | A run used as a single hold: reserve once, settle once. `reservations.reserve` is a TypeScript SDK helper over `runs.start`. | Not a separate API. There are no reservation endpoints. |
-| **Budget** | A hard cap on a key you choose, checked before work runs: [Unprice Budgets](/budgets/overview), `/v1/budgets`. A run's own cap is its `budgetAmountMinor` on `runs.start`, or `maximumAmountMinor` on `reservations.reserve`. | Not the customer's balance. A budget caps spend; the wallet is what funds it. |
+| **Hold** | The most one step may cost, reserved on a budget before the step runs and settled with what it cost. `budget(key).authorize` returns it. | Not a charge. A hold that is released or settled lower returns the rest. |
+| **Budget** | A hard cap on a key you choose, checked before work runs: [Unprice Budgets](/budgets/overview), `/v1/budgets`. A run's cap is a budget key with `closesAt`. | Not the customer's balance. A budget caps spend; the wallet is what funds it. |
 | **Wallet credits** | The customer's balance that budgets and usage draw from. Read with `wallet.balance`. | Not an entitlement limit. Credits are money; limits are counts. |
 | **Entitlement** | One customer's access and limit for one feature, derived from their plan version. Checked with `access.check`. | Not a feature. The feature is what you sell; the entitlement is this customer's state of it. |
 | **Money path** | The trail from authorization to invoice line: decision, rated usage, ledger entry, invoice evidence. Also written *customer money path*; they are the same thing. | Not a funds flow. Money never moves through Unprice. |
@@ -58,7 +57,7 @@ units — cents for USD.
 | Paid action | Your app is about to run work that can create cost. | The money decision happens before the cost exists. |
 | Pricing model | Unprice resolves the plan version, feature, meter, and entitlement. | Pricing logic stays out of product branches. |
 | Runtime decision | Unprice checks entitlement, budget, wallet credits, and meter rules. | An allow reserves; a deny stops the request before any provider call. |
-| Evidence trail | Usage facts, wallet movement, ledger entries, and invoice evidence stay connected. | Support, analytics, replay, and invoices use one explanation. |
+| Evidence trail | Usage facts, wallet movement, ledger entries, and invoice evidence stay connected. | Support, analytics, ingestion status, and invoices use one explanation. |
 | Payment capture | Stripe captures payment or Sandbox simulates it. | The payment rail stays separate from pricing logic. |
 
 ## The payment-provider boundary
@@ -83,11 +82,8 @@ wallet, billing, or invoice-evidence logic into product code.
   <Card title="Report usage evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/usage/record">
     Use `usage.record` when the request does not wait for Unprice to decide.
   </Card>
-  <Card title="Hold a maximum, then settle" icon="lock" href="/libraries/ts/sdk/runs/reservations">
-    Use `reservations.reserve` when one call's cost is unknown until it returns.
-  </Card>
-  <Card title="Budget a multi-step workload" icon="route" href="/libraries/ts/sdk/runs/start">
-    Use `runs.start`, `runs.consume`, `runs.settle`, and `runs.end` for jobs, workflows, tool chains, and agents.
+  <Card title="Hold a maximum, then settle" icon="lock" href="/budgets/spend">
+    Use `budget(key).authorize` or `spend` when one call's cost is unknown until it returns, or to cap a multi-step workload.
   </Card>
 </CardGroup>
 

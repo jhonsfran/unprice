@@ -1,0 +1,196 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`listPlanVersions snippet text > curl keeps the exact default request and follow-up 1`] = `
+"curl -sS "http://localhost:8787/v1/plan-versions/list" \\
+  -H "Authorization: Bearer $UNPRICE_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+  "billingInterval": "month",
+  "currency": "USD"
+}'
+"
+`;
+
+exports[`listPlanVersions snippet text > curl keeps the exact filtered request and dashboard context 1`] = `
+"curl -sS "http://localhost:8787/v1/plan-versions/list" \\
+  -H "Authorization: Bearer example" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+  "planVersionIds": ["pv_first", "pv_second"],
+  "billingInterval": "year",
+  "currency": "EUR"
+}'
+"
+`;
+
+exports[`listPlanVersions snippet text > curl uses defaults when the request filters are empty 1`] = `
+"curl -sS "http://localhost:8787/v1/plan-versions/list" \\
+  -H "Authorization: Bearer $UNPRICE_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+  "billingInterval": "month",
+  "currency": "USD"
+}'
+"
+`;
+
+exports[`listPlanVersions snippet text > fetch keeps the exact default request and follow-up 1`] = `
+"const baseUrl = "http://localhost:8787"
+const token = process.env.UNPRICE_TOKEN
+
+const response = await fetch(baseUrl + "/v1/plan-versions/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    billingInterval: "month",
+    currency: "USD",
+  }),
+})
+
+if (!response.ok) {
+  throw new Error(await response.text())
+}
+
+const data = await response.json()
+
+const [planVersion] = data.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+"
+`;
+
+exports[`listPlanVersions snippet text > fetch keeps the exact filtered request and dashboard context 1`] = `
+"const baseUrl = "http://localhost:8787"
+
+const response = await fetch(baseUrl + "/v1/plan-versions/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer example",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    planVersionIds: ["pv_first", "pv_second"],
+    billingInterval: "year",
+    currency: "EUR",
+  }),
+})
+
+if (!response.ok) {
+  throw new Error(await response.text())
+}
+
+const data = await response.json()
+
+// Dashboard context: v3; features: "tokens", "requests"
+const [planVersion] = data.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+"
+`;
+
+exports[`listPlanVersions snippet text > fetch uses defaults when the request filters are empty 1`] = `
+"const baseUrl = "http://localhost:8787"
+const token = process.env.UNPRICE_TOKEN
+
+const response = await fetch(baseUrl + "/v1/plan-versions/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    billingInterval: "month",
+    currency: "USD",
+  }),
+})
+
+if (!response.ok) {
+  throw new Error(await response.text())
+}
+
+const data = await response.json()
+
+// Dashboard context: v0; features: "tokens"
+const [planVersion] = data.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+"
+`;
+
+exports[`listPlanVersions snippet text > sdk keeps the exact default request and follow-up 1`] = `
+"import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN!,
+  baseUrl: "http://localhost:8787",
+})
+
+const { result, error } = await unprice.planVersions.list({
+  billingInterval: "month",
+  currency: "USD",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+const [planVersion] = result.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+"
+`;
+
+exports[`listPlanVersions snippet text > sdk keeps the exact filtered request and dashboard context 1`] = `
+"import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: "example",
+  baseUrl: "http://localhost:8787",
+})
+
+const { result, error } = await unprice.planVersions.list({
+  planVersionIds: ["pv_first", "pv_second"],
+  billingInterval: "year",
+  currency: "EUR",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+// Dashboard context: v3; features: "tokens", "requests"
+const [planVersion] = result.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+"
+`;
+
+exports[`listPlanVersions snippet text > sdk uses defaults when the request filters are empty 1`] = `
+"import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN!,
+  baseUrl: "http://localhost:8787",
+})
+
+const { result, error } = await unprice.planVersions.list({
+  billingInterval: "month",
+  currency: "USD",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+// Dashboard context: v0; features: "tokens"
+const [planVersion] = result.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+"
+`;

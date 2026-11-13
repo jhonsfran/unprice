@@ -150,7 +150,7 @@ Proof points:
 - Access checks and synchronous usage consumption.
 - Invoice explanation from plan versions, billing periods, pricing rules, rated usage events when
   present, wallet movement, and ledger captures.
-- Ingestion status and replay.
+- Journal ingestion status and rejected event payloads.
 
 ### Spend Safety For Expensive Workloads
 
@@ -163,9 +163,11 @@ for products whose customers burn credits, including when an agent triggers the 
 
 Proof points:
 
-- Budgeted runs with up-front wallet reservation.
-- Workload attribution.
-- Run-level budget rejection.
+- Standalone budget keys with up-front capacity holds.
+- Application-defined workload keys.
+- Hard-limit denials with a blocking limit and remedy.
+
+Standalone keys do not reserve customer wallet credits or create invoice usage.
 
 ### Explainable Money Flow
 
@@ -174,7 +176,7 @@ Customers, engineers, and operators need evidence for why something was charged 
 Proof points:
 
 - Invoice charge explanation.
-- Ingestion status and replay.
+- Journal ingestion status and rejected event payloads.
 - Ledger-backed wallet balances and credit attribution.
 
 ### Open, Independent Money-Path Infrastructure
@@ -187,7 +189,7 @@ Proof points:
 - Open-source codebase (AGPL-3.0 core plus a commercial license) you can read, fork, and run in
   your own Cloudflare account — or have your agent read — before you trust it.
 - Double-entry wallet ledger.
-- Explicit schemas for plans, plan versions, features, meters, entitlements, wallets, and runs.
+- Explicit schemas for plans, plan versions, features, meters, entitlements, wallets, and budget keys.
 - Generated SDK surface from OpenAPI contracts.
 
 ### Versioned PriceOps Model
@@ -235,7 +237,7 @@ Allowed now:
 - "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
-- "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
+- "Budget keys for agents, workflows, jobs, tools, and custom workloads."
 - "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
@@ -273,7 +275,7 @@ limits, plan versioning with pinned customers, or concurrency testing — the co
 them, and a strawman burns trust with the exact engineer Unprice sells to. Contrast only on the
 four code-verified differences owned by `positioning-and-messaging.md`: double-entry accounting vs
 mutable balances, stored invoice explanation vs reconstruct-by-join, processor independence vs
-Stripe-required persistence, and budgeted workload runs vs per-call locks. Re-verify all four
+Stripe-required persistence, and budget keys and holds vs per-call locks. Re-verify all four
 before each external use; their code moves fast.
 
 ## Vocabulary
@@ -288,7 +290,7 @@ Use:
 - Open money-path infrastructure
 - Customer money path
 - Usage enforcement
-- Budgeted runs
+- Budget keys
 - Spend-safe metering
 - Explainable usage billing
 - Wallet credits
@@ -331,7 +333,7 @@ Use:
 - Ledger paper: the faint dot grid, hairline rails, and `+` registration marks — the receipt
   vocabulary at page scale.
 - Dense but calm layouts with clear groupings.
-- Monospace accents for IDs, slugs, event names, run IDs, amounts, and ledger facts. The mono is
+- Monospace accents for IDs, slugs, event names, budget keys, operation IDs, amounts, and ledger facts. The mono is
   where the brand voice lives — every fact the product asserts renders in it.
 - Display type that is bigger and *lighter* (Geist variable weight ≈540), with two-tone
   muted-to-ink emphasis. Boldness comes from the concept, never from heavier type.

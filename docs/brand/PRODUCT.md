@@ -59,8 +59,8 @@ survive until the invoice exists.
 The dashboard and API work together:
 
 - The dashboard makes plans, plan versions, features, customers, subscriptions, entitlements, usage,
-  wallets, runs, invoices, and ingestion state understandable.
-- The API makes access checks, usage reporting, synchronous consumption, budgeted runs, wallet
+  wallets, budget keys, invoices, and ingestion state understandable.
+- The API makes access checks, usage reporting, synchronous consumption, budget handles, wallet
   balances, and analytics easy to integrate into production request paths.
 
 Success means a founder or engineer can support new pricing models, authorize customer spend in the
@@ -137,7 +137,7 @@ Use:
 - "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
-- "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
+- "Budget keys for agents, workflows, jobs, tools, and custom workloads."
 - "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
@@ -154,8 +154,8 @@ Avoid until proven:
 - Enterprise revenue recognition, tax, or accounting replacement.
 - "AI agent platform" or ownership of prompts, tools, memory, traces, or deployments.
 - Infrastructure-agnostic self-hosting (VPS, docker-compose, Kubernetes) — the runtime deploys to
-  the buyer's own Cloudflare account today (Workers, Durable Objects, Queues, Pipelines) and uses
-  Tinybird for usage analytics.
+  the buyer's own Cloudflare account today (Workers, Durable Objects, Pipelines), with
+  usage analytics on R2 read through Basin SQL.
 
 ## Payments And Business Model
 
@@ -168,7 +168,7 @@ Unprice is open-core: an AGPL-3.0 open-source core plus a Commercial License for
 open-source their modifications or want dedicated support.
 
 Hosting boundary: the runtime deploys to the buyer's own Cloudflare account (Workers, Durable
-Objects, Queues, Pipelines); usage analytics run on Tinybird. Say "run it in your own Cloudflare
+Objects, Pipelines); usage analytics run on R2 with Basin SQL. Say "run it in your own Cloudflare
 account," not unqualified "self-host," until a portable runtime ships.
 
 ## Brand Personality
@@ -184,7 +184,7 @@ direct state, and obvious next actions over decorative SaaS gloss.
 1. Show the customer money path. Connect request, meter, entitlement, budget, wallet, plan version, and
    invoice state.
 2. Keep the developer path short. API keys, SDK examples, event ingestion, entitlement checks,
-   budgeted runs, and replay actions should be easy to find and hard to misread.
+   budget keys, and rejected event payloads should be easy to find and hard to misread.
 3. Make state explicit. Use concrete lifecycle labels instead of vague analytics language.
 4. Support pricing flexibility without ambiguity. Usage features should clearly expose meter,
    limit, reset, billing, and overage behavior.

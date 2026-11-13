@@ -1,11 +1,13 @@
 import { createRoute } from "@hono/zod-openapi"
 import { authorizeBudgetInputSchema, authorizeBudgetResponseSchema } from "@unprice/db/validators"
+import { amountUsage } from "@unprice/services/budgets"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { openApiBudgetErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { runBudgetVerb, toWire } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { amountToWire, balanceToWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -36,14 +38,22 @@ export const route = createRoute(
 
 export const registerAuthorizeBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { key, ...request } = c.req.valid("json")
+    const { key, amount, ...request } = c.req.valid("json")
     const {
       type: _,
       created,
+      reserved,
+      balance,
       ...held
-    } = await runBudgetVerb(c, key, { type: "authorize", ...request })
+    } = await runBudgetVerb(c, key, { type: "authorize", ...request, usage: amountUsage(amount) })
     return c.json(
-      { allowed: true as const, ...toWire(held), created: created !== null },
+      {
+        allowed: true as const,
+        ...held,
+        amount: amountToWire(reserved),
+        balance: balanceToWire(balance),
+        created: created !== null,
+      },
       HttpStatusCodes.OK
     )
   })

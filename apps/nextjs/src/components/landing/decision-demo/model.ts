@@ -69,7 +69,7 @@ export const DEFAULT_FEATURES: Feature[] = [
     id: "compute_min",
     displayName: "Compute",
     type: "usage",
-    call: "runs.start",
+    call: "budget.authorize",
     rate: 0.15,
     unit: "GB-hrs",
     rateUnit: "GB-hr",
@@ -187,9 +187,7 @@ export const DECISION_COPY: Record<
   },
   deny: {
     title: "deny · before any cost",
-    // The API answers a denial with 200 + a rejection reason; 429 is rate
-    // limiting and belongs to a different failure entirely.
-    code: "LIMIT_EXCEEDED",
+    code: "BUDGET_EXCEEDED",
     next: "do not run · no cost created",
     value: "deny",
   },

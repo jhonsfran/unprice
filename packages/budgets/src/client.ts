@@ -1,16 +1,13 @@
 import { name, version } from "../package.json"
 import {
+  type BudgetHandleOptions,
   type LocalBudgetHandle,
   type LocalBudgetOptions,
   type LocalLeases,
   createLocalLeases,
+  openBudgetHandle,
 } from "./budget-local"
-import {
-  type BudgetDefinitionInput,
-  type BudgetHandle,
-  type SpendSettlement,
-  createBudgetHandle,
-} from "./budgets"
+import type { BudgetHandle, SpendSettlement } from "./budgets"
 import type { ApiError } from "./errors"
 import { type GeneratedSdkResources, createGeneratedSdkResources } from "./generated/sdk-resources"
 import { type ModelCatalog, type ModelRate, createModelCatalog } from "./model-catalog"
@@ -63,20 +60,14 @@ export class Unprice implements GeneratedSdkResources {
    *
    * @throws RangeError when the key has an open local lease with other lease options.
    */
-  budget(key: string, options?: { ifMissing?: BudgetDefinitionInput }): BudgetHandle
+  budget(key: string, options: LocalBudgetOptions & BudgetHandleOptions): LocalBudgetHandle
+  budget(key: string, options?: BudgetHandleOptions): BudgetHandle
   budget(
     key: string,
-    options: LocalBudgetOptions & { ifMissing?: BudgetDefinitionInput }
-  ): LocalBudgetHandle
-  budget(
-    key: string,
-    options?:
-      | { ifMissing?: BudgetDefinitionInput }
-      | (LocalBudgetOptions & { ifMissing?: BudgetDefinitionInput })
+    options?: BudgetHandleOptions | (LocalBudgetOptions & BudgetHandleOptions)
   ): BudgetHandle | LocalBudgetHandle {
-    const remote = createBudgetHandle(this.budgets, key, this.settlement, options?.ifMissing)
-    if (!options || !("mode" in options)) return remote
-    return this.local.budget(remote, key, options.lease, options.ifMissing)
+    const { budgets, settlement, local } = this
+    return openBudgetHandle({ budgets, settlement, local }, key, options)
   }
 
   /**

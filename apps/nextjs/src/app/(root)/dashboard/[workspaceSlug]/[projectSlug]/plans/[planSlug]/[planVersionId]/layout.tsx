@@ -11,7 +11,7 @@ import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
 import { BannerInactiveVersion, BannerPublishedVersion } from "./_components/banner"
 import { PlanVersionHeaderActions } from "./_components/plan-version-header-actions"
-import { VersionContextStrip } from "./_components/version-context-strip"
+import { VersionNav } from "./_components/version-nav"
 
 export default async function PlanVersionLayout(props: {
   children: React.ReactNode
@@ -73,14 +73,19 @@ export default async function PlanVersionLayout(props: {
                   planVersionId={planVersion.id}
                   status={status}
                   active={active}
+                  currency={planVersion.currency}
+                  features={planVersion.planFeatures.map((planFeature) => ({
+                    feature: { slug: planFeature.feature.slug, title: planFeature.feature.title },
+                  }))}
                 />
               </div>
             }
           />
-          <VersionContextStrip
+          <VersionNav
             currentId={planVersion.id}
             baseHref={baseHref}
             versions={plan.versions}
+            featureCount={planVersion.planFeatures.length}
           />
         </div>
       }

@@ -118,6 +118,10 @@ export default async function PlanPage(props: {
               Versions
             </SuperLink>
           </TabNavigationLink>
+          {/* prices live on rate cards; the cards page is reached from here, not the left nav */}
+          <TabNavigationLink asChild>
+            <SuperLink href={`/${workspaceSlug}/${projectSlug}/rate-cards`}>Rate cards</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">

@@ -6,7 +6,6 @@ import { siteConfig } from "~/constants/layout"
 import { fontMapper } from "~/styles/fonts"
 
 import "~/styles/sites.css"
-import { UpdateMarketingCookie } from "../(root)/auth/_components/update-marketing-cookie"
 
 // TODO: get metadata from the site
 export const metadata = {
@@ -53,7 +52,6 @@ export default function SitesLayout(props: { children: React.ReactNode }) {
             <TooltipProvider delayDuration={300}>{props.children}</TooltipProvider>
           </ThemeProvider>
 
-          <UpdateMarketingCookie />
           <ToasterProvider />
         </body>
       </html>

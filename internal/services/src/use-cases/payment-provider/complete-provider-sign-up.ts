@@ -1,11 +1,12 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq, sql } from "@unprice/db"
 import { customerProviderIds, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { PaymentProvider } from "@unprice/db/validators"
+import { type PaymentProvider, customerSessionPlanVersionSchema } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import { type WebEventsWriter, recordWebEvents } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
+import { signupWebEventRow } from "../../analytics/web-analytics"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
@@ -14,7 +15,7 @@ export type CompleteProviderSignUpDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
-  analytics: Analytics
+  webEvents: WebEventsWriter
   waitUntil: (promise: Promise<unknown>) => void
 }
 
@@ -432,6 +433,22 @@ export async function completeProviderSignUp(
       return Err(updateProviderMappingErr)
     }
 
+    const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+      subscriptionId: subscription.id,
+      projectId,
+      now: Date.now(),
+      db: tx,
+    })
+
+    if (billingPeriodsResult.err) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PHASE_NOT_CREATED",
+          message: billingPeriodsResult.err.message,
+        })
+      )
+    }
+
     return Ok({ subscriptionId: subscription.id })
   })
 
@@ -445,42 +462,32 @@ export async function completeProviderSignUp(
     return Err(subscriptionResult.err)
   }
 
-  const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
-    subscriptionId: subscriptionResult.val.subscriptionId,
-    projectId,
-    now: Date.now(),
-  })
-
-  if (billingPeriodsResult.err) {
-    return Err(
-      new UnPriceCustomerError({
-        code: "PHASE_NOT_CREATED",
-        message: billingPeriodsResult.err.message,
-      })
-    )
-  }
-
-  await activateWalletIfSubscriptionIsActive(deps, {
+  const activated = await activateWalletIfSubscriptionIsActive(deps, {
     subscriptionId: subscriptionResult.val.subscriptionId,
     projectId,
     context:
       "payment provider signup wallet activation failed; subscription parked in pending_activation",
   })
 
-  deps.waitUntil(
-    deps.analytics.ingestEvents({
-      action: "signup",
-      version: "1",
-      session_id: customerSession.metadata?.sessionId ?? "",
-      project_id: projectId,
-      timestamp: new Date().toISOString(),
-      payload: {
-        customer_id: customerUnprice.id,
-        plan_version_id: customerSession.planVersion.id,
-        page_id: customerSession.metadata?.pageId ?? "",
-        status: "signup_success",
-      },
+  if (!activated)
+    await deps.services.billing.syncPayerBudget({
+      projectId,
+      customerId: customerUnprice.id,
+      caller: "request",
     })
+
+  deps.waitUntil(
+    recordWebEvents(deps, [
+      signupWebEventRow({
+        projectId,
+        customerId: customerUnprice.id,
+        planVersion: customerSessionPlanVersionSchema
+          .required({ planId: true })
+          .parse(customerSession.planVersion),
+        pageId: customerSession.metadata?.pageId,
+        status: "signup_success",
+      }),
+    ])
   )
 
   return Ok({

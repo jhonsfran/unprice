@@ -132,6 +132,20 @@ export async function createSubscription(
         }
       }
 
+      const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+        subscriptionId: subscription.id,
+        projectId,
+        now: Date.now(),
+        db: tx,
+      })
+
+      if (billingPeriodsResult.err) {
+        transactionError = new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
+          message: billingPeriodsResult.err.message,
+        })
+        throw transactionError
+      }
       return subscription
     })
     .then((subscription) => Ok(subscription))
@@ -149,21 +163,6 @@ export async function createSubscription(
     return result
   }
 
-  const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
-    subscriptionId: result.val.id,
-    projectId,
-    now: Date.now(),
-  })
-
-  if (billingPeriodsResult.err) {
-    return Err(
-      new UnPriceSubscriptionError({
-        code: "SUBSCRIPTION_OPERATION_FAILED",
-        message: billingPeriodsResult.err.message,
-      })
-    )
-  }
-
   // Sub-create is a pure DB write up to here. Wallet activation only fires
   // for subscriptions that landed directly in `active`. Capped phases may
   // need a period `credit_line` grant; uncapped phases carry their policy to
@@ -176,19 +175,26 @@ export async function createSubscription(
   //                        on first paid invoice/topup; that transition
   //                        runs through `activating` and issues grants.
   //
-  // Reservations are never opened here: EntitlementWindowDO opens them
-  // lazily on first priced usage event.
+  // No usage hold is opened here: the payer budget (BudgetDO) prices usage
+  // as it lands.
   const subscription = result.val
   // The activating XState actor parks failed activations in
   // `pending_activation`; the machine subscriber has already persisted that
   // status to the DB before we return here. The bouncer / ACL layer denies
   // ingestion while in that state, and the activation sweeper retries grant
   // issuance until it succeeds.
-  await activateWalletIfSubscriptionIsActive(deps, {
+  const activated = await activateWalletIfSubscriptionIsActive(deps, {
     subscriptionId: subscription.id,
     projectId,
     context: "wallet activation failed; subscription parked in pending_activation",
   })
+
+  if (!activated)
+    await deps.services.billing.syncPayerBudget({
+      projectId,
+      customerId: input.customerId,
+      caller: "request",
+    })
 
   return result
 }

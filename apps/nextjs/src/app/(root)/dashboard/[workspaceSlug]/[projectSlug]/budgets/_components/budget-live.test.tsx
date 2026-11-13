@@ -129,6 +129,30 @@ describe("BudgetLive", () => {
     ).toEqual([])
   })
 
+  it("shows a quantity limit in its feature's units, never as money", () => {
+    const quantity = {
+      id: "api_calls:day",
+      window: "day" as const,
+      enforce: "hard" as const,
+      feature: "api_calls",
+      amount: "10000",
+      consumed: "2500",
+      held: "0",
+      remaining: "7500",
+      resetsAt: now + 3_600_000,
+    }
+    const html = render([
+      { ...page, budget: { ...page.budget, balance: { ...balance, limits: [quantity] } } },
+    ])
+
+    expect([
+      html.includes("2,500 api_calls used"),
+      html.includes("7,500 api_calls left"),
+      html.includes("of 10,000 api_calls"),
+      html.includes("10,000.00"),
+    ]).toEqual([true, true, true, false])
+  })
+
   it("says the scan reached the end after an empty last page and hides Scan further", () => {
     const empty = { ...page, expiringNext: { rows: [], examined: 3, next: null }, listed: "0" }
     const html = render([page, empty])

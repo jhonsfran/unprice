@@ -101,7 +101,7 @@ export function DecisionReceipt({
 
       <div className="flex items-baseline justify-between gap-2 pb-3">
         <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
-          budgeted run
+          proof budget
         </span>
         <span className="whitespace-nowrap font-mono text-[11px] text-background-text tabular-nums">
           {formatMoney(action.unitPriceMinor)} · one action

@@ -1,348 +1,22 @@
 "use client"
 
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
-import { useFieldArray } from "react-hook-form"
-import { z } from "zod"
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { slugify } from "@unprice/db/utils"
+import { useQuery } from "@tanstack/react-query"
 import { AGGREGATION_METHODS, AGGREGATION_METHODS_MAP } from "@unprice/db/utils"
 import type { AggregationMethod, Event, PlanVersionFeatureInsert } from "@unprice/db/validators"
-import { eventInsertBaseSchema } from "@unprice/db/validators"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandLoading,
-} from "@unprice/ui/command"
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
-import { Input } from "@unprice/ui/input"
-import { LoadingAnimation } from "@unprice/ui/loading-animation"
-import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
-import {
-  ResponsiveDialog,
-  ResponsiveDialogContent,
-  ResponsiveDialogDescription,
-  ResponsiveDialogFooter,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@unprice/ui/responsive-dialog"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
-import { CheckIcon, ChevronDown, HelpCircle, Pencil, Plus, XCircle } from "lucide-react"
-import { FilterScroll } from "~/components/filter-scroll"
-import { SubmitButton } from "~/components/submit-button"
-import { toastAction } from "~/lib/toast"
-import { useZodForm } from "~/lib/zod-form"
+import { HelpCircle, Pencil, Plus } from "lucide-react"
 import { useTRPC } from "~/trpc/client"
-
-const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
-const EVENT_PICKER_SEARCH_THRESHOLD = 6
-
-const eventFormSchema = z.object({
-  name: eventInsertBaseSchema.shape.name,
-  slug: eventInsertBaseSchema.shape.slug,
-  availableProperties: z.array(
-    z.object({
-      value: z
-        .string()
-        .min(1, "Property name is required")
-        .regex(/^[a-z0-9._-]+$/, {
-          message:
-            "Property names must contain only lowercase letters, numbers, dots, dashes, and underscores",
-        }),
-    })
-  ),
-})
-
-type EventFormValues = z.infer<typeof eventFormSchema>
-
-function requiresAggregationField(method?: AggregationMethod) {
-  return Boolean(method && !AGGREGATION_METHODS_WITHOUT_FIELD.has(method))
-}
-
-function toEventFormValues(event?: Event, suggestedProperty?: string): EventFormValues {
-  const properties =
-    event?.availableProperties?.map((value) => ({ value })) ??
-    (suggestedProperty ? [{ value: suggestedProperty }] : [])
-
-  return {
-    name: event?.name ?? "",
-    slug: event?.slug ?? "",
-    availableProperties: properties,
-  }
-}
-
-function toAvailableProperties(values: EventFormValues["availableProperties"]) {
-  return Array.from(new Set(values.map((property) => property.value.trim()).filter(Boolean)))
-}
-
-function getNextAggregationField({
-  currentValue,
-  event,
-  method,
-}: {
-  currentValue?: string
-  event?: Event
-  method?: AggregationMethod
-}) {
-  if (!requiresAggregationField(method)) {
-    return undefined
-  }
-
-  const properties = event?.availableProperties ?? []
-
-  if (!properties.length) {
-    return undefined
-  }
-
-  if (currentValue && properties.includes(currentValue)) {
-    return currentValue
-  }
-
-  return properties.length === 1 ? properties[0] : undefined
-}
-
-function EventFormDialog({
-  open,
-  onOpenChange,
-  mode,
-  event,
-  suggestedProperty,
-  onSaved,
-  isDisabled,
-  isPlanVersionLocked,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  mode: "create" | "edit"
-  event?: Event
-  suggestedProperty?: string
-  onSaved: (event: Event) => Promise<void> | void
-  isDisabled?: boolean
-  isPlanVersionLocked?: boolean
-}) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const createEvent = useMutation(trpc.events.create.mutationOptions())
-  const updateEvent = useMutation(trpc.events.update.mutationOptions())
-  const form = useZodForm({
-    schema: eventFormSchema,
-    defaultValues: toEventFormValues(event, suggestedProperty),
-  })
-  const { fields, append, remove } = useFieldArray({
-    control: form.control,
-    name: "availableProperties",
-  })
-  const immutablePropertyCount = mode === "edit" ? (event?.availableProperties?.length ?? 0) : 0
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-
-    form.reset(toEventFormValues(event, suggestedProperty))
-  }, [event?.id, form, open, suggestedProperty])
-
-  const isPending = createEvent.isPending || updateEvent.isPending
-  const isCreateDisabled = Boolean(isDisabled && mode === "create")
-  const isExistingEventMetadataLocked = Boolean(isPlanVersionLocked && mode === "edit")
-
-  const onSubmit = async (data: EventFormValues) => {
-    const availableProperties = toAvailableProperties(data.availableProperties)
-
-    const result =
-      mode === "create"
-        ? await createEvent.mutateAsync({
-            name: data.name,
-            slug: data.slug,
-            availableProperties,
-          })
-        : await updateEvent.mutateAsync({
-            id: event!.id,
-            name: data.name,
-            availableProperties,
-          })
-
-    await queryClient.invalidateQueries({
-      queryKey: trpc.events.listByActiveProject.queryKey(),
-    })
-
-    toastAction(mode === "create" ? "saved" : "updated")
-    await onSaved(result.event)
-    onOpenChange(false)
-  }
-
-  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.stopPropagation()
-    void form.handleSubmit(onSubmit)(event)
-  }
-
-  return (
-    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
-      <ResponsiveDialogContent className="md:max-w-[620px]">
-        <ResponsiveDialogHeader className="space-y-2">
-          <ResponsiveDialogTitle>
-            {mode === "create" ? "Create event" : isPlanVersionLocked ? "View event" : "Edit event"}
-          </ResponsiveDialogTitle>
-          <ResponsiveDialogDescription>
-            Events are reusable across features. Add the SDK slug once, then list any numeric
-            payload fields you may want to aggregate later.
-          </ResponsiveDialogDescription>
-        </ResponsiveDialogHeader>
-
-        <Form {...form}>
-          <form onSubmit={handleFormSubmit} className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem className="space-y-2">
-                    <FormLabel>Name</FormLabel>
-                    <FormDescription>Internal label shown in the dashboard.</FormDescription>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder="AI completion"
-                        disabled={isCreateDisabled || isExistingEventMetadataLocked || isPending}
-                        onChange={(e) => {
-                          field.onChange(e)
-
-                          if (mode === "create") {
-                            form.setValue("slug", slugify(e.target.value))
-                          }
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="slug"
-                render={({ field }) => (
-                  <FormItem className="space-y-2">
-                    <FormLabel>SDK Slug</FormLabel>
-                    <FormDescription>Slugs are immutable after creation.</FormDescription>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        className="font-mono"
-                        placeholder="ai_completion"
-                        disabled={isCreateDisabled || isPending || mode === "edit"}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="space-y-3 rounded-lg bg-background-bgSubtle/30 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="font-medium text-sm">Numeric properties</p>
-                  <p className="text-muted-foreground text-xs">
-                    Add payload fields you may aggregate later, like `value`, `input_tokens`, or
-                    `active_seats`.
-                    {mode === "edit" ? " Existing properties cannot be removed." : ""}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  disabled={isCreateDisabled || isPending}
-                  onClick={() => append({ value: "" })}
-                >
-                  <Plus className="mr-2 size-3.5" />
-                  Add property
-                </Button>
-              </div>
-
-              {fields.length ? (
-                <div className="space-y-2">
-                  {fields.map((field, index) => {
-                    const isImmutableProperty = mode === "edit" && index < immutablePropertyCount
-
-                    return (
-                      <div key={field.id} className="flex items-start gap-2">
-                        <FormField
-                          control={form.control}
-                          name={`availableProperties.${index}.value`}
-                          render={({ field }) => (
-                            <FormItem className="flex-1 space-y-1">
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  className="font-mono"
-                                  placeholder="input_tokens"
-                                  disabled={isCreateDisabled || isPending || isImmutableProperty}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="mt-0.5 shrink-0"
-                          disabled={isCreateDisabled || isPending || isImmutableProperty}
-                          onClick={() => remove(index)}
-                        >
-                          <XCircle className="size-4" />
-                          <span className="sr-only">
-                            {isImmutableProperty
-                              ? "Existing properties cannot be removed"
-                              : "Remove property"}
-                          </span>
-                        </Button>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed px-3 py-4 text-center text-muted-foreground text-xs">
-                  No numeric properties yet. You can still save a count-based event now and add
-                  properties later if you need sum, max, or latest aggregation.
-                </div>
-              )}
-            </div>
-
-            <ResponsiveDialogFooter className="pt-2">
-              <SubmitButton
-                isSubmitting={form.formState.isSubmitting}
-                isDisabled={isCreateDisabled || isPending}
-                label={mode === "create" ? "Create event" : "Save event"}
-              />
-            </ResponsiveDialogFooter>
-          </form>
-        </Form>
-      </ResponsiveDialogContent>
-    </ResponsiveDialog>
-  )
-}
+import { DimensionChips } from "./dimension-chips"
+import { EventFormDialog } from "./event-dialog"
+import { EventPicker } from "./event-picker"
+import { aggregationFieldFor, meterDefaultsFor, requiresAggregationField } from "./meter-defaults"
 
 export function MeterConfigFormField({
   form,
@@ -352,11 +26,9 @@ export function MeterConfigFormField({
   isDisabled?: boolean
 }) {
   const trpc = useTRPC()
-  const [isPickerOpen, setIsPickerOpen] = useState(false)
-  const [eventDialogMode, setEventDialogMode] = useState<"create" | "edit">("create")
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false)
   const meterConfig = form.watch("meterConfig")
-  const { data: eventsData, isLoading } = useQuery(trpc.events.listByActiveProject.queryOptions())
+  const { data: eventsData } = useQuery(trpc.events.listByActiveProject.queryOptions())
   const events = eventsData?.events ?? []
 
   const selectedEvent = useMemo(() => {
@@ -366,19 +38,23 @@ export function MeterConfigFormField({
     )
   }, [events, meterConfig?.eventId, meterConfig?.eventSlug])
 
+  // The method picked before an event is, since the meter cannot be written without one.
   const [draftAggregationMethod, setDraftAggregationMethod] = useState<AggregationMethod>(
     meterConfig?.aggregationMethod ?? "sum"
   )
-
-  useEffect(() => {
-    setDraftAggregationMethod(meterConfig?.aggregationMethod ?? "sum")
-  }, [meterConfig?.aggregationMethod])
 
   const selectedAggregationMethod = meterConfig?.aggregationMethod ?? draftAggregationMethod
   const needsAggregationField = requiresAggregationField(selectedAggregationMethod)
   const selectedEventProperties = selectedEvent?.availableProperties ?? []
   const selectedAggregationConfig = AGGREGATION_METHODS_MAP[selectedAggregationMethod]
-  const shouldShowEventSearch = events.length > EVENT_PICKER_SEARCH_THRESHOLD
+  const [isVaryingOpen, setIsVaryingOpen] = useState(false)
+  // The common case first, then the event's own properties other than the one it measures.
+  const dimensionSuggestions = [
+    ...new Set([
+      "model",
+      ...selectedEventProperties.filter((property) => property !== meterConfig?.aggregationField),
+    ]),
+  ].slice(0, 6)
 
   const setMeterConfigValue = (next: {
     event?: Event
@@ -389,11 +65,11 @@ export function MeterConfigFormField({
     const aggregationMethod = next.aggregationMethod ?? selectedAggregationMethod
     const aggregationField =
       next.aggregationField ??
-      getNextAggregationField({
-        currentValue: meterConfig?.aggregationField,
-        event,
-        method: aggregationMethod,
-      })
+      aggregationFieldFor(
+        event?.availableProperties ?? [],
+        aggregationMethod,
+        meterConfig?.aggregationField
+      )
 
     if (!event?.id) {
       return
@@ -406,12 +82,24 @@ export function MeterConfigFormField({
         eventSlug: event.slug,
         aggregationMethod,
         ...(aggregationField ? { aggregationField } : {}),
+        ...(meterConfig?.groupBy?.length ? { groupBy: meterConfig.groupBy } : {}),
       },
       {
         shouldDirty: true,
         shouldValidate: true,
       }
     )
+  }
+
+  const handleDimensionsChange = (groupBy: string[]) => {
+    form.setValue("meterConfig.groupBy", groupBy.length > 0 ? groupBy : undefined, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    // A row with dimensions is a unit price, so tiers and packages need a meter without them.
+    if (groupBy.length > 0 && form.getValues("config.usageMode") !== "unit") {
+      form.setValue("config.usageMode", "unit", { shouldDirty: true, shouldValidate: true })
+    }
   }
 
   const handleAggregationMethodChange = (value: AggregationMethod) => {
@@ -424,12 +112,23 @@ export function MeterConfigFormField({
     setMeterConfigValue({
       event: selectedEvent,
       aggregationMethod: value,
-      aggregationField: getNextAggregationField({
-        currentValue: meterConfig?.aggregationField,
-        event: selectedEvent,
-        method: value,
-      }),
+      aggregationField: aggregationFieldFor(
+        selectedEventProperties,
+        value,
+        meterConfig?.aggregationField
+      ),
     })
+  }
+
+  // Picking or creating an event sets the meter that fits it: Count for an event without a
+  // number, else the current method over the event's property.
+  const handleEventChosen = (event: Event) => {
+    const defaults = meterDefaultsFor(event, {
+      aggregationMethod: selectedAggregationMethod,
+      aggregationField: meterConfig?.aggregationField,
+    })
+    setDraftAggregationMethod(defaults.aggregationMethod)
+    setMeterConfigValue({ event, ...defaults })
   }
 
   const handleEventSaved = async (event: Event) => {
@@ -437,25 +136,23 @@ export function MeterConfigFormField({
       return
     }
 
-    setMeterConfigValue({
-      event,
-      aggregationMethod: selectedAggregationMethod,
-      aggregationField: getNextAggregationField({
-        currentValue: meterConfig?.aggregationField,
-        event,
-        method: selectedAggregationMethod,
-      }),
-    })
+    handleEventChosen(event)
   }
 
+  // A stored meter whose field the event no longer carries (or never did) aggregates the event's
+  // first property, so the form validates against what the event can send.
   useEffect(() => {
-    if (!selectedEvent?.id || !needsAggregationField || selectedEventProperties.length !== 1) {
+    if (!selectedEvent?.id || !needsAggregationField || selectedEventProperties.length === 0) {
       return
     }
 
-    const onlyProperty = selectedEventProperties[0]
+    const field = aggregationFieldFor(
+      selectedEventProperties,
+      selectedAggregationMethod,
+      meterConfig?.aggregationField
+    )
 
-    if (meterConfig?.aggregationField === onlyProperty) {
+    if (!field || meterConfig?.aggregationField === field) {
       return
     }
 
@@ -465,7 +162,8 @@ export function MeterConfigFormField({
         eventId: selectedEvent.id,
         eventSlug: selectedEvent.slug,
         aggregationMethod: selectedAggregationMethod,
-        aggregationField: onlyProperty,
+        aggregationField: field,
+        ...(meterConfig?.groupBy?.length ? { groupBy: meterConfig.groupBy } : {}),
       },
       {
         shouldDirty: false,
@@ -475,16 +173,13 @@ export function MeterConfigFormField({
   }, [
     form,
     meterConfig?.aggregationField,
+    meterConfig?.groupBy,
     needsAggregationField,
     selectedAggregationMethod,
     selectedEvent?.id,
     selectedEvent?.slug,
     selectedEventProperties,
   ])
-
-  const suggestedProperty = needsAggregationField
-    ? (meterConfig?.aggregationField ?? "value")
-    : undefined
 
   return (
     <>
@@ -502,8 +197,8 @@ export function MeterConfigFormField({
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-[250px]">
-                      The SDK event this feature listens to. The event slug is snapshotted into the
-                      plan version feature for fast routing later.
+                      The event your app sends when the feature is used, such as one API call or one
+                      model response.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -512,10 +207,7 @@ export function MeterConfigFormField({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setEventDialogMode("edit")
-                      setIsEventDialogOpen(true)
-                    }}
+                    onClick={() => setIsEventDialogOpen(true)}
                   >
                     <Pencil className="mr-1.5 size-3" />
                     {isDisabled ? "View event" : "Edit event"}
@@ -523,130 +215,14 @@ export function MeterConfigFormField({
                 )}
               </div>
 
-              <Popover
-                modal={true}
-                open={isPickerOpen}
-                onOpenChange={(open) => {
-                  if (isDisabled) {
-                    return
-                  }
-
-                  setIsPickerOpen(open)
-                }}
-              >
-                <PopoverTrigger asChild>
-                  <FormControl>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      // biome-ignore lint/a11y/useSemanticElements: Button trigger matches the shared searchable picker pattern used across the app.
-                      role="combobox"
-                      aria-expanded={isPickerOpen}
-                      aria-controls="meter-event-picker-popup"
-                      disabled={isDisabled}
-                      className="h-9 w-full justify-between gap-2 px-3 font-normal"
-                    >
-                      {isLoading ? (
-                        <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                          <LoadingAnimation className="size-4" variant="dots" />
-                          <span className="text-muted-foreground text-sm">Loading events...</span>
-                        </div>
-                      ) : selectedEvent ? (
-                        <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                          <span className="truncate">{selectedEvent.name}</span>
-                          <span className="truncate font-mono text-[11px] text-muted-foreground">
-                            {selectedEvent.slug}
-                          </span>
-                        </div>
-                      ) : meterConfig?.eventSlug ? (
-                        <span className="truncate text-left font-mono text-sm">
-                          {meterConfig.eventSlug}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">
-                          Select or create an event
-                        </span>
-                      )}
-                      <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                    </Button>
-                  </FormControl>
-                </PopoverTrigger>
-                <PopoverContent
-                  id="meter-event-picker-popup"
-                  align="start"
-                  className="max-h-[--radix-popover-content-available-height] w-[var(--radix-popover-trigger-width)] p-0"
-                >
-                  <Command>
-                    {shouldShowEventSearch ? (
-                      <CommandInput className="h-9 py-2 text-sm" placeholder="Search events" />
-                    ) : null}
-                    <CommandList className="overflow-hidden">
-                      <CommandEmpty>No events found.</CommandEmpty>
-                      <FilterScroll>
-                        <CommandGroup className="p-1">
-                          {isLoading && <CommandLoading>Loading...</CommandLoading>}
-                          {events.map((event) => {
-                            const propertyCount = (event.availableProperties ?? []).length
-
-                            return (
-                              <CommandItem
-                                key={event.id}
-                                value={`${event.name} ${event.slug} ${(event.availableProperties ?? []).join(" ")}`}
-                                className="gap-2 rounded-md px-2.5 py-2"
-                                onSelect={() => {
-                                  setMeterConfigValue({
-                                    event,
-                                    aggregationMethod: selectedAggregationMethod,
-                                  })
-                                  setIsPickerOpen(false)
-                                }}
-                              >
-                                <CheckIcon
-                                  className={cn(
-                                    "size-4 shrink-0",
-                                    event.id === selectedEvent?.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                  <span className="truncate font-medium text-sm">{event.name}</span>
-                                  <span className="truncate font-mono text-[11px] text-muted-foreground">
-                                    {event.slug}
-                                  </span>
-                                </div>
-                                {propertyCount > 0 ? (
-                                  <Badge
-                                    variant="secondary"
-                                    className="shrink-0 rounded-sm px-1.5 py-0 text-[10px]"
-                                  >
-                                    {propertyCount} {propertyCount === 1 ? "field" : "fields"}
-                                  </Badge>
-                                ) : null}
-                              </CommandItem>
-                            )
-                          })}
-                        </CommandGroup>
-                      </FilterScroll>
-                    </CommandList>
-                  </Command>
-                  <div className="border-t p-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-full justify-start px-2"
-                      disabled={isDisabled}
-                      onClick={() => {
-                        setEventDialogMode("create")
-                        setIsEventDialogOpen(true)
-                        setIsPickerOpen(false)
-                      }}
-                    >
-                      <Plus className="mr-2 size-4" />
-                      Create event
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <FormControl>
+                <EventPicker
+                  selectedEventId={meterConfig?.eventId}
+                  fallbackSlug={meterConfig?.eventSlug}
+                  onPick={handleEventChosen}
+                  isDisabled={isDisabled}
+                />
+              </FormControl>
 
               <FormMessage />
             </FormItem>
@@ -665,14 +241,13 @@ export function MeterConfigFormField({
             render={() => (
               <FormItem className="flex flex-col">
                 <div className="mb-2 flex items-center gap-1">
-                  <FormLabel>Aggregation method</FormLabel>
+                  <FormLabel>Measure</FormLabel>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-[320px]">
-                      Choose how this feature interprets matched events. Count-based methods do not
-                      need a numeric field; sum, max, and latest do.
+                      How the events add up to usage: count them, or sum a number they carry.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -714,7 +289,7 @@ export function MeterConfigFormField({
               render={({ field }) => (
                 <FormItem className="flex flex-col">
                   <div className="mb-2 flex items-center gap-1">
-                    <FormLabel>Aggregation field</FormLabel>
+                    <FormLabel>Of property</FormLabel>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <HelpCircle className="size-3.5 text-muted-foreground" />
@@ -771,10 +346,7 @@ export function MeterConfigFormField({
                           variant="ghost"
                           size="sm"
                           className="h-auto px-0 text-xs"
-                          onClick={() => {
-                            setEventDialogMode("edit")
-                            setIsEventDialogOpen(true)
-                          }}
+                          onClick={() => setIsEventDialogOpen(true)}
                         >
                           <Pencil className="mr-1.5 size-3.5" />
                           {isDisabled ? "View event" : "Edit event"}
@@ -789,17 +361,66 @@ export function MeterConfigFormField({
             />
           )}
         </div>
+
+        <FormField
+          control={form.control}
+          name="meterConfig.groupBy"
+          render={({ field }) => {
+            const dimensions = field.value ?? []
+            if (dimensions.length === 0 && !isVaryingOpen) {
+              return (
+                <FormItem className="flex flex-row items-center justify-between gap-3 space-y-0 rounded-md border border-dashed px-3 py-2">
+                  <span className="text-muted-foreground text-xs">One price for every event.</span>
+                  {!isDisabled && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-2 text-xs"
+                      onClick={() => setIsVaryingOpen(true)}
+                    >
+                      <Plus className="size-3" />
+                      Price per model or property
+                    </Button>
+                  )}
+                </FormItem>
+              )
+            }
+            return (
+              <FormItem className="flex flex-col">
+                <div className="mb-2 flex items-center gap-1">
+                  <FormLabel>Price varies by</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[320px]">
+                      Give each value of an event property its own price, such as one price per
+                      model. Prices are then set per unit, with no included units.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <FormControl>
+                  <DimensionChips
+                    value={dimensions}
+                    onChange={handleDimensionsChange}
+                    isDisabled={isDisabled}
+                    suggestions={dimensionSuggestions}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )
+          }}
+        />
       </div>
 
       <EventFormDialog
         open={isEventDialogOpen}
         onOpenChange={setIsEventDialogOpen}
-        mode={eventDialogMode}
-        event={eventDialogMode === "edit" ? selectedEvent : undefined}
-        suggestedProperty={suggestedProperty}
+        event={selectedEvent}
         onSaved={handleEventSaved}
-        isDisabled={isDisabled}
-        isPlanVersionLocked={isDisabled}
+        isLocked={isDisabled}
       />
     </>
   )

@@ -5,6 +5,7 @@ import { MemoryBudgetStore } from "./memory-store.fixture"
 
 const now = Date.parse("2026-10-20T12:00:00Z")
 const amount = BigInt(100_000_000)
+const usage = { amount, quantities: {} }
 
 function budget(closesAt: number | null = null) {
   const store = new MemoryBudgetStore()
@@ -21,7 +22,7 @@ function budget(closesAt: number | null = null) {
 describe("budget admission", () => {
   it("refuses a stale operator release without changing the replacement hold", () => {
     const store = budget()
-    store.run({ type: "authorize", idempotencyKey: "new-work", amount }, now)
+    store.run({ type: "authorize", idempotencyKey: "new-work", usage }, now)
 
     const result = store.run(
       { type: "release", holdId: "h_1", holdCreatedAt: now - 8 * 86_400_000 },
@@ -33,12 +34,12 @@ describe("budget admission", () => {
     expect(hold?.kind === "hold" && hold.state).toEqual({
       status: "open",
     })
-    expect(store.ledger.held).toBe(amount)
+    expect(store.ledger.held).toEqual(usage)
   })
 
   it("replays the release of the exact hold", () => {
     const store = budget()
-    store.run({ type: "authorize", idempotencyKey: "work", amount }, now)
+    store.run({ type: "authorize", idempotencyKey: "work", usage }, now)
     const command = { type: "release", holdId: "h_1", holdCreatedAt: now } as const
 
     store.run(command, now + 1)
@@ -46,7 +47,7 @@ describe("budget admission", () => {
 
     expect(replay.val?.ok && replay.val.outcome).toMatchObject({
       type: "release",
-      released: amount,
+      released: usage,
       replayed: true,
     })
   })
@@ -64,7 +65,7 @@ describe("budget admission", () => {
     }
 
     const probe = inspect(reader, read.val.outcome, { probe: amount }, now)
-    const authorized = store.run({ type: "authorize", idempotencyKey: "work", amount }, now)
+    const authorized = store.run({ type: "authorize", idempotencyKey: "work", usage }, now)
 
     expect(probe.probe).toEqual({
       amount,

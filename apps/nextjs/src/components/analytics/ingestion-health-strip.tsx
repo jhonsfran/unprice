@@ -3,7 +3,7 @@
 import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
-import { AlertTriangle, CheckCircle2, CircleSlash, ShieldAlert, XCircle } from "lucide-react"
+import { CheckCircle2, CircleSlash, ShieldAlert } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { NumberTicker } from "~/components/analytics/number-ticker"
@@ -12,11 +12,8 @@ import {
   type IngestionStatus,
   formatSuccessRate,
   getActionMessages,
-  getAttentionCount,
   getEnforcementLabel,
   getEnforcementTone,
-  getPipelineLabel,
-  getPipelineTone,
   getSuccessTone,
 } from "./ingestion-health-model"
 
@@ -39,18 +36,12 @@ export function IngestionHealthStrip({
   presentation = "card",
   showNoEventsAction = true,
 }: IngestionHealthStripProps) {
-  const pipelineTone = getPipelineTone(status)
   const enforcementTone = getEnforcementTone(status)
   const successTone = getSuccessTone(status)
-  const attentionCount = getAttentionCount(status)
   const processedCount = status.totals.processed
   const rejectedCount = status.totals.rejected
-  const failedCount = status.totals.failed
   const actionMessages = getActionMessages(status, { showNoEventsAction })
-  const pipelineLabel = getPipelineLabel(status)
   const enforcementLabel = getEnforcementLabel(status)
-  // an empty window collapses to one quiet line: five tiles saying "0" five
-  // ways is noise, not evidence
   const isEmptyWindow = status.totals.total === 0
   const metrics = isEmptyWindow ? (
     <div className="flex items-center gap-2 rounded-md border border-dashed px-4 py-3 text-muted-foreground text-sm">
@@ -58,7 +49,7 @@ export function IngestionHealthStrip({
       <span>No events in this window. Health tiles appear once traffic arrives.</span>
     </div>
   ) : (
-    <EvidenceMetricStrip className="md:grid-cols-5">
+    <EvidenceMetricStrip className="md:grid-cols-3">
       <EvidenceMetricTile
         label="Success"
         value={formatSuccessRate(status.successRate)}
@@ -81,22 +72,6 @@ export function IngestionHealthStrip({
         helper="business denials"
         tone={status.totals.rejected > 0 ? "warning" : "default"}
         icon={<CircleSlash className="size-4" />}
-      />
-      <EvidenceMetricTile
-        label="Failed"
-        value={<NumberTicker value={failedCount} decimalPlaces={0} startValue={failedCount} />}
-        helper="system failures"
-        tone={status.totals.failed > 0 ? "destructive" : "default"}
-        icon={<XCircle className="size-4" />}
-      />
-      <EvidenceMetricTile
-        label="Attention"
-        value={
-          <NumberTicker value={attentionCount} decimalPlaces={0} startValue={attentionCount} />
-        }
-        helper="rejected + failed"
-        tone={attentionCount > 0 ? "warning" : "success"}
-        icon={<AlertTriangle className="size-4" />}
       />
     </EvidenceMetricStrip>
   )
@@ -140,7 +115,6 @@ export function IngestionHealthStrip({
           <div className="flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle>{title}</CardTitle>
-              <Badge variant={pipelineTone}>{pipelineLabel}</Badge>
               <Badge variant={enforcementTone}>{enforcementLabel}</Badge>
             </div>
             <CardDescription>{description}</CardDescription>
@@ -171,18 +145,11 @@ function IngestionHealthEvidenceSection({
   className?: string
   children: ReactNode
 }) {
-  const pipelineTone = getPipelineTone(status)
   const enforcementTone = getEnforcementTone(status)
-  const pipelineLabel = getPipelineLabel(status)
   const enforcementLabel = getEnforcementLabel(status)
   const badges = useMemo(
-    () => (
-      <>
-        <Badge variant={pipelineTone}>{pipelineLabel}</Badge>
-        <Badge variant={enforcementTone}>{enforcementLabel}</Badge>
-      </>
-    ),
-    [enforcementLabel, enforcementTone, pipelineLabel, pipelineTone]
+    () => <Badge variant={enforcementTone}>{enforcementLabel}</Badge>,
+    [enforcementLabel, enforcementTone]
   )
   const actions = useMemo(
     () => <FreshnessIndicator generatedAt={status.freshness.generatedAt} isFetching={isFetching} />,

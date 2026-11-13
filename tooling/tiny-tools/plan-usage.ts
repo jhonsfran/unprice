@@ -162,31 +162,13 @@ function buildUsageAmounts(
     return Array.from({ length: eventCount }, () => requestedAmount)
   }
 
-  if (method === "count") {
-    const eventCount =
-      limit == null ? requestedEvents : Math.min(requestedEvents, Math.floor(limit - previousUsage))
-
-    assert(
-      eventCount > 0,
-      `usage feature has no remaining capacity for count events (${previousUsage}/${limit})`
-    )
-
-    return Array.from({ length: eventCount }, () => requestedAmount)
-  }
-
-  const firstAmount =
-    limit == null
-      ? Math.max(requestedAmount, previousUsage + 1)
-      : Math.min(Math.max(requestedAmount, previousUsage + 1), limit)
   const eventCount =
-    limit == null ? requestedEvents : Math.min(requestedEvents, Math.floor(limit - firstAmount + 1))
-
+    limit == null ? requestedEvents : Math.min(requestedEvents, Math.floor(limit - previousUsage))
   assert(
     eventCount > 0,
-    `usage feature has no remaining capacity for ${method} events (${previousUsage}/${limit})`
+    `usage feature has no remaining capacity for count events (${previousUsage}/${limit})`
   )
-
-  return Array.from({ length: eventCount }, (_, index) => firstAmount + index)
+  return Array.from({ length: eventCount }, () => requestedAmount)
 }
 
 function buildTotalUsageAmounts(
@@ -212,25 +194,15 @@ function buildTotalUsageAmounts(
     return usageAmounts.filter((amount) => amount > 0)
   }
 
-  if (method === "count") {
-    assert(
-      Number.isInteger(totalUsageAmount),
-      `TOTAL_USAGE_AMOUNT must be a positive integer for count meters. Received: ${totalUsageAmount}`
-    )
-    assert(
-      limit == null || previousUsage + totalUsageAmount <= limit,
-      `requested TOTAL_USAGE_AMOUNT=${totalUsageAmount} exceeds remaining capacity (${previousUsage}/${limit})`
-    )
-
-    return Array.from({ length: totalUsageAmount }, () => BULK_USAGE_AMOUNT)
-  }
-
   assert(
-    limit == null || totalUsageAmount <= limit,
-    `requested TOTAL_USAGE_AMOUNT=${totalUsageAmount} exceeds limit ${limit}`
+    Number.isInteger(totalUsageAmount),
+    `TOTAL_USAGE_AMOUNT must be a positive integer for count meters. Received: ${totalUsageAmount}`
   )
-
-  return [totalUsageAmount]
+  assert(
+    limit == null || previousUsage + totalUsageAmount <= limit,
+    `requested TOTAL_USAGE_AMOUNT=${totalUsageAmount} exceeds remaining capacity (${previousUsage}/${limit})`
+  )
+  return Array.from({ length: totalUsageAmount }, () => BULK_USAGE_AMOUNT)
 }
 
 function expectedUsageAfter(
@@ -238,19 +210,12 @@ function expectedUsageAfter(
   method: AggregationMethod,
   usageAmounts: number[]
 ): number {
-  if (method === "sum") {
-    return previousUsage + usageAmounts.reduce((total, amount) => total + amount, 0)
-  }
-
-  if (method === "count") {
-    return previousUsage + usageAmounts.length
-  }
-
-  if (method === "max") {
-    return Math.max(previousUsage, ...usageAmounts)
-  }
-
-  return usageAmounts.at(-1) ?? previousUsage
+  return (
+    previousUsage +
+    (method === "count"
+      ? usageAmounts.length
+      : usageAmounts.reduce((total, amount) => total + amount, 0))
+  )
 }
 
 async function discoverUsageFeature(): Promise<void> {
@@ -349,27 +314,21 @@ async function trySelectUsageFeature(
 async function ingestUsageAmounts(usageAmounts: number[], label: string): Promise<void> {
   assert(selectedUsageFeature, "usage feature should be selected before ingestion")
 
-  const timestampBase = Date.now()
   for (const [index, usageAmount] of usageAmounts.entries()) {
     const properties = buildIngestionProperties(usageAmount, selectedUsageFeature)
     const idempotencyKey = randomUUID()
     const { result, error } = await unprice.usage.consume({
       customerId: CUSTOMER_ID,
       eventSlug: selectedUsageFeature.eventSlug,
-      featureSlug: selectedUsageFeature.featureSlug,
       properties,
-      timestamp: timestampBase + index,
       idempotencyKey,
     })
 
-    assert(!error, `${label} usage.consume error: ${error?.message}`)
-    assert(!!result, `${label} usage.consume result should exist`)
     assert(
-      result.allowed === true,
-      `${label} usage.consume rejected at event ${index + 1}/${usageAmounts.length}: ${
-        result.rejectionReason ?? "unknown reason"
-      }`
+      !error,
+      `${label} usage.consume rejected at event ${index + 1}/${usageAmounts.length}: ${error?.code} ${error?.message}`
     )
+    assert(!!result, `${label} usage.consume result should exist`)
 
     ingestedEvents++
   }

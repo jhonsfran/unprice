@@ -28,7 +28,7 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
   }
 })
 
-import { BillingPeriodUsageCoverageError } from "@unprice/services/use-cases"
+import { UnPriceBudgetError } from "@unprice/services/budgets"
 import { registerGetCurrentBillingPeriodUsageV1 } from "./getCurrentBillingPeriodUsageV1"
 
 const now = Date.UTC(2026, 7, 2, 9, 0, 0)
@@ -101,73 +101,50 @@ describe("getCurrentBillingPeriodUsageV1 route", () => {
     await expect(response.json()).resolves.toEqual({ billing_periods: [] })
   })
 
-  it("logs a use-case failure before returning an API error", async () => {
-    const analyticsError = new Error("analytics unavailable")
-    const { app, env, executionCtx, loggerError } = createTestApp({ analyticsError })
+  it("labels a credit-unit amount with no currency", async () => {
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [
+        {
+          ...billingPeriod(),
+          usage: [{ featureSlug: "tokens", usage: 5, amount: "12", unit: "credits:acme" }],
+        },
+      ],
+    })
 
     const response = await app.fetch(buildRequest({ customer_id: "cus_123" }), env, executionCtx)
 
-    expect(response.status).toBe(500)
-    expect(loggerError).toHaveBeenCalledWith(
-      "current billing-period usage tinybird query failed",
-      expect.objectContaining({
-        pipe: "v1_get_billing_period_usage",
-        project_id: "proj_123",
-        customer_id: "cus_123",
-      })
-    )
+    const body = (await response.json()) as {
+      billing_periods: Array<{ usage: Array<{ spending: unknown }> }>
+    }
+    expect(body.billing_periods[0]?.usage[0]?.spending).toEqual({
+      amount: "12",
+      currency: "XXX",
+      display_amount: "12 credits:acme",
+    })
   })
 
-  it("returns 412 instead of a partial report before billing-period attribution coverage", async () => {
-    const { app, env, executionCtx, loggerWarn } = createTestApp({
-      analyticsError: new BillingPeriodUsageCoverageError({
-        billingPeriodIds: ["bp_current"],
-        customerId: "cus_123",
-        projectId: "proj_123",
-        start: now - 86_400_000,
-        end: now + 2_505_600_000,
-      }),
+  it("maps a payer budget rejection to its API error", async () => {
+    const { app, env, executionCtx } = createTestApp({
+      failure: new UnPriceBudgetError({ code: "BUDGET_CLOSED", closedAt: now }),
     })
 
     const response = await app.fetch(buildRequest({ customer_id: "cus_123" }), env, executionCtx)
 
-    expect(response.status).toBe(412)
-    await expect(response.json()).resolves.toEqual({
-      code: "PRECONDITION_FAILED",
-      message:
-        "Current billing-period usage is unavailable until pre-attribution usage is migrated.",
-    })
-    expect(loggerWarn).toHaveBeenCalledWith(
-      "current billing-period usage is incomplete before attribution migration",
-      expect.objectContaining({
-        pipe: "v1_get_billing_period_usage_coverage",
-        project_id: "proj_123",
-        customer_id: "cus_123",
-      })
-    )
+    expect(response.status).toBe(409)
   })
 })
 
 function createTestApp(
   options: {
-    analyticsError?: Error
+    failure?: UnPriceBudgetError
     billingPeriods?: Array<BillingPeriod>
   } = {}
 ) {
   const app = new OpenAPIHono<HonoEnv>()
-  const loggerError = vi.fn()
-  const loggerWarn = vi.fn()
-  const analytics = { getBillingPeriodUsage: vi.fn() }
-  const db = { query: { billingPeriods: { findMany: vi.fn() } } }
 
   useCaseMocks.getCurrentBillingPeriodUsage.mockImplementation(async () => {
-    if (options.analyticsError) return { err: options.analyticsError }
-
-    return {
-      val: {
-        billingPeriods: options.billingPeriods ?? [billingPeriod()],
-      },
-    }
+    if (options.failure) return { err: options.failure }
+    return { val: { billingPeriods: options.billingPeriods ?? [billingPeriod()] } }
   })
 
   app.use(timing())
@@ -178,15 +155,7 @@ function createTestApp(
     throw error
   })
   app.use("*", async (c, next) => {
-    c.set("analytics", analytics)
-    c.set("db", db)
-    c.set("logger", {
-      set: vi.fn(),
-      debug: vi.fn(),
-      warn: loggerWarn,
-      error: loggerError,
-      flush: vi.fn(),
-    })
+    c.set("services", {} as HonoEnv["Variables"]["services"])
     c.set("requestId", "req_123")
     c.set("requestStartedAt", now)
     await next()
@@ -201,36 +170,17 @@ function createTestApp(
       passThroughOnException: vi.fn(),
       waitUntil: vi.fn(),
     } as unknown as ExecutionContext,
-    loggerError,
-    loggerWarn,
   }
 }
 
-type BillingPeriod = {
-  cycleEndAt: number
-  cycleStartAt: number
-  id: string
-  usage: Array<{
-    amount: number
-    currency: string
-    featureSlug: string
-    usage: number
-  }>
-}
+type BillingPeriod = UseCasesModule.GetCurrentBillingPeriodUsageOutput["billingPeriods"][number]
 
 function billingPeriod(): BillingPeriod {
   return {
     id: "bp_current",
     cycleStartAt: now - 86_400_000,
     cycleEndAt: now + 2_505_600_000,
-    usage: [
-      {
-        featureSlug: "tokens",
-        usage: 5_100,
-        amount: 5_100_000,
-        currency: "USD",
-      },
-    ],
+    usage: [{ featureSlug: "tokens", usage: 5_100, amount: "0.051", unit: "money:USD" }],
   }
 }
 

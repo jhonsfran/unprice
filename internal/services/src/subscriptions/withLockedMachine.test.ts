@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -6,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import type { LedgerGateway } from "../ledger"
-import type { RatingService } from "../rating/service"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { SubscriptionRepository } from "./repository"
 import { LockLostError, withLockedMachine } from "./withLockedMachine"
 
@@ -164,8 +162,7 @@ describe("withLockedMachine", () => {
 
 function createDeps(projectId: string, subscriptionId: string, db: Database) {
   return {
-    reservationFlushGateway: createBillingGatewayStub(),
-    analytics: {} as Analytics,
+    invoicing: createInvoicingStub(),
     billingService: {
       generateBillingPeriods: vi
         .fn()
@@ -177,7 +174,6 @@ function createDeps(projectId: string, subscriptionId: string, db: Database) {
     logger: createLogger(),
     now: 0,
     projectId,
-    ratingService: {} as RatingService,
     repo: {} as SubscriptionRepository,
     subscriptionId,
   }

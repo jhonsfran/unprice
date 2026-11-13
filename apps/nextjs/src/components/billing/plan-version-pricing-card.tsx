@@ -1,6 +1,7 @@
 "use client"
 
-import { calculateFlatPricePlan, getTrialUnitLabel } from "@unprice/db/validators"
+import { getTrialUnitLabel } from "@unprice/db/validators"
+import type { FeaturePriceRows } from "@unprice/services/pricing"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
@@ -34,23 +35,17 @@ export function PlanVersionPricingCard({
   highlight = false,
   className,
   renderAction,
+  priceRows,
 }: {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
   action: PlanVersionPricingCardAction
   highlight?: boolean
   className?: string
   renderAction?: (action: PlanVersionPricingCardAction) => React.ReactNode
+  /** The version's card rows by feature slug, so each line can say what more of it costs. */
+  priceRows?: ReadonlyMap<string, FeaturePriceRows>
 }) {
   if (!planVersion) return null
-
-  const { err, val } = calculateFlatPricePlan({
-    planVersion,
-    prorate: 1,
-  })
-
-  if (err) {
-    return <>Error calculating price</>
-  }
 
   const trialUnits = planVersion.trialUnits ?? 0
   const trialUnitLabel = getTrialUnitLabel({
@@ -69,7 +64,7 @@ export function PlanVersionPricingCard({
   return (
     <Card
       className={cn(
-        "group flex h-full w-[300px] flex-col overflow-hidden border-border bg-card transition-[background-color,border-color,box-shadow] duration-200",
+        "group flex h-full w-[300px] flex-col overflow-hidden border-border bg-card transition-[background-color,border-color,box-shadow] duration-150 ease-out",
         isInteractive && "hover:border-primary-borderHover hover:bg-background-bgSubtle",
         isEmphasized && "border-primary-border shadow-sm",
         className
@@ -94,7 +89,7 @@ export function PlanVersionPricingCard({
           <div className="flex flex-col gap-1">
             <div className="flex items-baseline gap-2">
               <span className="font-extrabold text-4xl text-background-textContrast tracking-tight">
-                {val.displayAmount}
+                {planVersion.flatPrice}
               </span>
               <span className="font-medium text-muted-foreground text-sm">/ {billingLabel}</span>
             </div>
@@ -119,10 +114,9 @@ export function PlanVersionPricingCard({
               <li key={feature.id} className="flex w-full flex-col justify-start">
                 <PlanVersionFeatureListItem
                   feature={feature}
-                  displayOptions={{
-                    showCalculator: true,
-                    showQuantity: true,
-                  }}
+                  priceRows={priceRows?.get(feature.feature.slug)}
+                  currency={planVersion.currency}
+                  displayOptions={{ showQuantity: true }}
                   className="font-medium text-background-text"
                 />
               </li>

@@ -68,7 +68,7 @@ type CustomerOption = RouterOutputs["customers"]["listByActiveProject"]["custome
 const API_KEY_TYPE_OPTIONS: Record<ApiKeyType, { label: string; description: string }> = {
   runtime: {
     label: "Runtime",
-    description: "Checks access, records usage, and starts budgeted runs from your application.",
+    description: "Checks access and records usage from your application.",
   },
   config: {
     label: "Config",
@@ -254,7 +254,8 @@ function ApiKeyCreatedSecret({
           <div className="flex min-w-0 flex-col gap-1">
             <p className="font-medium">First request-path call</p>
             <p className="text-muted-foreground text-xs">
-              Use this key from your server to check access, record usage, or start a budgeted run.
+              Use this key from your server to check access, record usage, or cap spend with a
+              budget.
             </p>
           </div>
           <CodeApiSheet

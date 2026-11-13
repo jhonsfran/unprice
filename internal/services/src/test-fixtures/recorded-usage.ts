@@ -1,100 +1,71 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import { vi } from "vitest"
-import {
-  type BillingUsageSnapshot,
-  ownsBillingUsagePeriod,
-  registerBillingUsage,
-} from "../billing/usage-snapshot"
-import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
+import type { PayerStatementLine } from "../use-cases/budgets/invoice-payer-statements"
+import type { PayerBudgetGateway } from "../use-cases/budgets/payer-budget-gateway"
 
-type AcceptedUsage = Readonly<Record<string, Pick<BillingUsageSnapshot, "amount" | "quantity">>>
+/** What the payer budget accepted for a feature in each of its periods, at the ledger scale. */
+type AcceptedUsage = Readonly<Record<string, { amount: number; quantity: number }>>
 
+const SCALE = 100_000_000
+
+/**
+ * A payer budget that priced `acceptedUsage` per metered feature in every period it seals, so a
+ * billing test states the usage its invoice bills independently of wallet captures. A sealed
+ * statement keeps what it answered on a retry; completions are recorded.
+ */
 export function createRecordedUsageFixture(db: Database, acceptedUsage: AcceptedUsage) {
-  const analytics = {
-    getUsageBillingFeatures: vi.fn(async () => Ok([])),
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics
-  const snapshots = new Map<string, BillingUsageSnapshot>()
-  const reservationFlushGateway: BillingReservationFlushGateway = {
-    registerPeriods: async ({ registrations }) => {
-      for (const registration of registrations) {
-        const key = `${registration.customerEntitlementId}:${registration.billingPeriodId}`
-        if (!snapshots.has(key)) {
-          snapshots.set(key, registerBillingUsage(registration))
-        }
-      }
-      return Ok(undefined)
-    },
-    completeForInvoicing: async () => Ok(undefined),
-    flushForInvoicing: async (input) => {
+  const sealed = new Map<string, PayerStatementLine>()
+  const completed: string[] = []
+  const payerBudgets: PayerBudgetGateway = {
+    sync: async (input) =>
+      Ok({
+        status: "synced",
+        key: `unprice:customer:${input.customerId}`,
+        version: 1,
+        changes: [],
+        statements: 0,
+      }),
+    seal: async (input) => {
       const periods = await db.query.billingPeriods.findMany({
         where: (table, { and, eq }) =>
           and(
             eq(table.projectId, input.projectId),
             eq(table.customerId, input.customerId),
-            eq(table.subscriptionId, input.subscriptionId),
-            eq(table.subscriptionPhaseId, input.subscriptionPhaseId),
             eq(table.statementKey, input.statementKey)
           ),
-        with: {
-          subscriptionItem: { with: { featurePlanVersion: { with: { feature: true } } } },
-          subscriptionPhase: { with: { planVersion: true } },
-        },
+        with: { subscriptionItem: { with: { featurePlanVersion: { with: { feature: true } } } } },
       })
-      const sealed: BillingUsageSnapshot[] = []
       for (const period of periods) {
         if (period.subscriptionItem.featurePlanVersion.featureType !== "usage") continue
-        const entitlementRows = await db.query.customerEntitlements.findMany({
-          where: (table, { and, eq }) =>
-            and(
-              eq(table.projectId, input.projectId),
-              eq(table.customerId, input.customerId),
-              eq(table.subscriptionItemId, period.subscriptionItemId)
-            ),
-        })
-        const owners = entitlementRows.filter((row) => ownsBillingUsagePeriod(row, period))
-        const [owner] = owners
-        if (owners.length !== 1 || !owner) {
-          throw new Error("Recorded usage fixture needs one period owner")
-        }
-        const key = `${owner.id}:${period.id}`
-        const existing = snapshots.get(key)
-        if (existing && existing.state !== "open") {
-          sealed.push(existing)
-          continue
-        }
+        if (period.cycleEndAt > input.at || sealed.has(period.id)) continue
         const featureSlug = period.subscriptionItem.featurePlanVersion.feature.slug
         const accepted = acceptedUsage[featureSlug] ?? { amount: 0, quantity: 0 }
-        const snapshot: BillingUsageSnapshot = {
-          projectId: input.projectId,
-          customerId: input.customerId,
-          customerEntitlementId: owner.id,
-          subscriptionId: period.subscriptionId,
-          subscriptionPhaseId: period.subscriptionPhaseId,
-          subscriptionItemId: period.subscriptionItemId,
-          billingPeriodId: period.id,
+        sealed.set(period.id, {
+          periodId: period.id,
           statementKey: period.statementKey,
           featureSlug,
-          cycleStartAt: period.cycleStartAt,
-          cycleEndAt: period.cycleEndAt,
-          currency: period.subscriptionPhase.planVersion.currency,
-          amountScale: 8,
-          origin: "period_generation_v1",
-          registeredAt: period.cycleStartAt,
-          amount: accepted.amount,
-          quantity: accepted.quantity,
-          lastEventAt: accepted.quantity > 0 ? period.cycleEndAt - 1 : null,
-          state: "sealed",
-          sealedAt: period.cycleEndAt,
-          completedAt: null,
-        }
-        snapshots.set(key, snapshot)
-        sealed.push(snapshot)
+          start: period.cycleStartAt,
+          end: period.cycleEndAt,
+          amount: String(accepted.amount),
+          quantity: String(Math.round(accepted.quantity * SCALE)),
+          cost: null,
+          events: accepted.quantity > 0 ? 1 : 0,
+        })
       }
-      return Ok({ flushed: 0, skipped: 0, snapshots: sealed })
+      const lines = [...sealed.values()].filter((line) => line.statementKey === input.statementKey)
+      return Ok({ sealed: lines, open: [] })
+    },
+    completeInvoiced: async () => {
+      const periods = await db.query.billingPeriods.findMany({
+        columns: { id: true },
+        where: (table, { inArray }) => inArray(table.status, ["invoiced", "voided"]),
+      })
+      const done = periods
+        .map((period) => sealed.get(period.id)?.periodId)
+        .filter((id): id is string => id !== undefined && !completed.includes(id))
+      completed.push(...done)
+      return Ok({ completed: done })
     },
   }
-  return { analytics, reservationFlushGateway }
+  return { payerBudgets, completed }
 }

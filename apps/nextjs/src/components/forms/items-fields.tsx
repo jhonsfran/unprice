@@ -1,5 +1,4 @@
 "use client"
-import * as currencies from "dinero.js/currencies"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, LayoutGrid, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -17,18 +16,11 @@ import {
 
 import { nFormatter } from "@unprice/db/utils"
 import type {
-  Currency,
   SubscriptionItem,
   SubscriptionItemConfig,
   SubscriptionItemsConfig,
 } from "@unprice/db/validators"
-import {
-  calculateFreeUnits,
-  calculatePricePerFeature,
-  createDefaultSubscriptionConfig,
-  getBillingCycleMessage,
-} from "@unprice/db/validators"
-import { currencySymbol } from "@unprice/money"
+import { createDefaultSubscriptionConfig, getBillingCycleMessage } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {
@@ -53,11 +45,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
-import { type Dinero, add, dinero, toDecimal } from "dinero.js"
 import { FeatureConfigForm } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/feature-config-form"
 import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
-import { PriceFeature } from "~/components/forms/price-feature"
 import { PropagationStopper } from "~/components/prevent-propagation"
 import { capitalize } from "~/lib/capitalize"
 
@@ -87,6 +77,9 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
 }) {
   const planVersionId = form.watch("planVersionId" as FieldPath<TFieldValues>)
   const itemsSubs = form.watch("items" as FieldPath<TFieldValues>)
+  const configValues = form.watch("config" as FieldPath<TFieldValues>) as
+    | SubscriptionItemConfig[]
+    | undefined
 
   // TODO: use later for addons support
   const isSubscriptionTypeAddons = false
@@ -155,52 +148,17 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
       : undefined
   }
 
-  const configValues = form.watch("config" as FieldPath<TFieldValues>)
-
-  // calculate the total price for the plan
+  // The plan's flat price from its rate card (ADR-0008 D2). Package and tier items are priced by
+  // the quantity chosen above and usage as it lands, so the total names them instead of a sum.
   const displayTotalPrice = useMemo(() => {
-    if (!selectedPlanVersion || !configValues) return ""
-
-    const initialTotal = dinero({
-      amount: 0,
-      currency: currencies[selectedPlanVersion.currency],
-    })
-
-    let hasUsage = false
-
-    const totalPrice = configValues.reduce(
-      (total: Dinero<number>, field: SubscriptionItemConfig) => {
-        const feature = versionFeatures.get(field.featurePlanId)
-
-        if (!feature) return total
-
-        if (feature.featureType === "usage") {
-          hasUsage = true
-        }
-
-        const { val: price, err } = calculatePricePerFeature({
-          quantity: field.units ?? 0,
-          featureType: feature.featureType,
-          config: feature.config!,
-        })
-
-        if (err) return total
-
-        return add(total, price.totalPrice.dinero)
-      },
-      initialTotal
-    )
-
-    return toDecimal(totalPrice, ({ value, currency }) => {
-      if (hasUsage) {
-        return `${currencySymbol(currency.code as Currency)}${Number.parseFloat(value).toFixed(
-          2
-        )} + usage`
-      }
-
-      return `${currencySymbol(currency.code as Currency)}${Number.parseFloat(value).toFixed(2)}`
-    })
-  }, [JSON.stringify(configValues)])
+    if (!selectedPlanVersion) return ""
+    const types = new Set(selectedPlanVersion.planFeatures.map((feature) => feature.featureType))
+    return [
+      selectedPlanVersion.flatPrice,
+      ...(types.has("package") || types.has("tier") ? ["items by quantity"] : []),
+      ...(types.has("usage") ? ["usage"] : []),
+    ].join(" + ")
+  }, [selectedPlanVersion])
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -269,7 +227,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                           "pr-8": isSubscriptionTypeAddons,
                         })}
                       >
-                        Estimated Total
+                        Price
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -284,36 +242,22 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                       // if the feature is hidden, don't show it
                       if (!feature) return null
 
-                      // if the units are not set, use the minimum units
-                      const units =
-                        form.watch(`config.${index}.units` as FieldPath<TFieldValues>) ||
-                        itemConfig.min ||
-                        0
-
-                      const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
-                        config: feature.config!,
-                        featureType: feature.featureType,
-                      })
-
-                      if (freeUnitsErr) {
-                        console.error(freeUnitsErr)
-                        return "error calculating free units"
-                      }
-
                       const showUnits =
                         feature.featureType === "usage" &&
                         !feature.feature.slug.includes(feature.unitOfMeasure ?? "units")
+                      const unitText = showUnits ? ` ${feature.unitOfMeasure ?? "units"}` : ""
+                      const included = Number(feature.included ?? 0)
+
+                      const quantity = configValues?.[index]?.units
+                      const pricedByQuantity =
+                        feature.featureType === "package" || feature.featureType === "tier"
 
                       const freeUnitsText =
-                        freeUnits === Number.POSITIVE_INFINITY
-                          ? feature.limit
-                            ? `Up to ${nFormatter(feature.limit)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
+                        included > 0
+                          ? `${nFormatter(included)}${unitText} included`
+                          : feature.limit
+                            ? `Up to ${nFormatter(feature.limit)}${unitText}`
                             : "Unlimited"
-                          : freeUnits === 0
-                            ? feature.limit
-                              ? `Up to ${nFormatter(feature.limit)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
-                              : "Starts at 0"
-                            : `${nFormatter(freeUnits)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
 
                       return (
                         <TableRow key={item.id} className="border-b bg-transparent">
@@ -339,6 +283,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                                         {feature.feature.description ?? ""}
                                       </ResponsiveDialogDescription>
                                       <FeatureConfigForm
+                                        key={feature.id ?? feature.featureId}
                                         defaultValues={feature}
                                         planVersion={selectedPlanVersion!}
                                         className="my-6"
@@ -349,10 +294,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                               )}
                               <PlanVersionFeatureListItem
                                 feature={feature}
-                                displayOptions={{
-                                  showCalculator: true,
-                                  showCheckIcon: false,
-                                }}
+                                displayOptions={{ showCheckIcon: false }}
                               />
                             </div>
                           </TableCell>
@@ -390,7 +332,14 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                             )}
                           </TableCell>
                           <TableCell className="flex h-16 items-center justify-end gap-1 pr-1">
-                            <PriceFeature quantity={units || 0} feature={feature} type="total" />
+                            <div className="inline text-end font-mono text-xs">
+                              {feature.displayPrice ?? "not priced"}
+                              {pricedByQuantity && feature.displayPrice && (
+                                <span className="block text-muted-foreground">
+                                  for {quantity ?? 0} {feature.unitOfMeasure ?? "units"}
+                                </span>
+                              )}
+                            </div>
                             {isSubscriptionTypeAddons && isDelete.get(itemConfig.featurePlanId) && (
                               <div className="flex flex-row items-center">
                                 <Button

@@ -11,7 +11,8 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { runBudgetVerb, toWire } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { releaseToWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -49,9 +50,9 @@ export const registerReleaseBudgetInternalV1 = (app: App) =>
       c,
       key,
       { type: "release", holdId, holdCreatedAt },
-      { projectId }
+      { projectId, defaultCustomerId: null }
     ).catch(withRejection)
-    return c.json(toWire(released), HttpStatusCodes.OK)
+    return c.json(releaseToWire(released), HttpStatusCodes.OK)
   })
 
 /** Puts the budget's rejection in the details of a 404 or 409 that the public route flattens. */

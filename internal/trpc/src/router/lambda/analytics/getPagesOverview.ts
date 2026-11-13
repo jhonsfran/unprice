@@ -1,10 +1,10 @@
-import type { Analytics } from "@unprice/analytics"
-import type { PageOverview } from "@unprice/analytics"
+import type { PageOverview } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { WEB_ANALYTICS_UNAVAILABLE, pageVisitsInputSchema } from "./web-analytics-input"
 
 export const getPagesOverview = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getPagesOverview"]>[0]>())
+  .input(pageVisitsInputSchema)
   .output(
     z.object({
       data: z.custom<PageOverview>(),
@@ -23,7 +23,7 @@ export const getPagesOverview = protectedProjectProcedure
     })
 
     if (err) {
-      return { data: [], error: err.message }
+      return { data: [], error: WEB_ANALYTICS_UNAVAILABLE }
     }
 
     return val

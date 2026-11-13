@@ -14,8 +14,13 @@ const getByIdOutputSchema = z.object({
     planFeatures: z.array(
       planVersionFeatureSelectBaseSchema.extend({
         feature: featureSelectBaseSchema,
+        /** The feature's current price on the version's rate card; null without a row. */
+        displayPrice: z.string().nullable(),
+        displayFeatureText: z.string(),
       })
     ),
+    /** The flat features' flat rows on the version's rate card, summed and formatted. */
+    flatPrice: z.string(),
   }),
 })
 
@@ -32,7 +37,7 @@ export const getById = protectedProjectProcedure
     const project = opts.ctx.project
     const { plans } = opts.ctx.services
 
-    const { err, val: planVersionData } = await plans.getPlanVersionByIdDetailed({
+    const { err, val: planVersionData } = await plans.getPlanVersionWithPrices({
       planVersionId: id,
       projectId: project.id,
     })
@@ -51,7 +56,5 @@ export const getById = protectedProjectProcedure
       })
     }
 
-    return getByIdOutputSchema.parse({
-      planVersion: planVersionData,
-    })
+    return getByIdOutputSchema.parse({ planVersion: planVersionData })
   })

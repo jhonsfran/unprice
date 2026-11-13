@@ -224,9 +224,6 @@ function createDeps(overrides?: {
 
   const deps = {
     db,
-    analytics: {
-      getFeaturesUsagePeriod: vi.fn().mockResolvedValue({ data: [] }),
-    },
     logger,
     now: () => now,
     services: {
@@ -244,6 +241,7 @@ function createDeps(overrides?: {
       },
       billing: {
         generateBillingPeriods,
+        syncPayerBudget: async () => {},
       },
     },
   } as const

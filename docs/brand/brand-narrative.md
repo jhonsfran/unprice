@@ -44,7 +44,7 @@ That is the shift for AI products: every charge starts with an authorization. Th
 decide before the run, then keep the decision through settlement and invoicing.
 
 Unprice gives developer-led teams an open-source customer money path for that decision. It connects
-plan versions, feature pricing, meter events, entitlement checks, customer budgets, budgeted runs,
+plan versions, feature pricing, meter events, entitlement checks, customer budgets and workload caps,
 wallet credits, ledger captures, ingestion state, and invoice evidence in one inspectable path.
 
 ## The five-second moment
@@ -99,7 +99,7 @@ Because of that, teams needed pricing to make decisions while requests were stil
 cost was created and before the customer asked why they were charged.
 
 Because of that, the money path had to connect plan versions, feature pricing, usage, entitlements,
-budgets, credits, denials, ledger captures, replays, and invoices.
+budgets, credits, denials, ledger captures, journal events, and invoices.
 
 Until finally, pricing became runtime infrastructure.
 
@@ -129,7 +129,7 @@ This is the real pricing problem for usage-based and hybrid SaaS: the product ne
 while the request is still in flight, and a money explanation after the invoice exists.
 
 Unprice is the open-source customer money path for that flow. Your app can check access,
-consume usage, start and consume budgeted runs, reserve wallet credits, pin customers to plan
+consume usage, authorize and settle budget holds, reserve wallet credits, pin customers to plan
 versions, apply flat, tiered, package, and usage pricing, and keep evidence for the invoice that
 comes later. The dashboard makes the state visible. The API and SDK make the decision easy to place
 inside the product.
@@ -208,7 +208,7 @@ Then demonstrate the one-afternoon workflow-app proof:
 4. Call `access.check` beside the current product logic as a shadow decision.
 5. Run the workflow and show what Unprice would allow, deny, budget, or reserve.
 6. Simulate the same path on Sandbox.
-7. Show the usage, wallet, run, plan version, pricing rule, ledger, ingestion, and invoice evidence
+7. Show the usage, wallet, budget key, plan version, pricing rule, ledger, ingestion, and invoice evidence
    in the dashboard.
 
 The demo should end with:
@@ -252,14 +252,14 @@ The demo should end with:
 
 Use proof that exists in the product and docs:
 
-- SDK/API methods for `access.check`, `usage.record`, `usage.consume`, `runs.start`,
-  `runs.consume`, `runs.end`, `runs.get`, wallet balances, analytics, and ingestion replay.
+- SDK/API methods for `access.check`, `usage.record`, `usage.consume`, `budget(key).authorize`,
+  `hold.settle`, `budgets.get`, wallet balances, analytics, and journal ingestion status.
 - Plan versions that keep existing customers on the pricing they bought while new pricing
   experiments ship.
 - Flat, tiered, package, and usage feature pricing, with event-native meter configuration for usage
   features.
 - Wallet credits that are distinct from entitlement grants.
-- Budgeted runs for agents, workflows, jobs, tools, and custom workloads.
+- Budget keys for agents, workflows, jobs, tools, and custom workloads.
 - Invoice explanation that connects lines back to plan versions, billing periods, pricing rules,
   rated usage events when present, wallet movement, and ledger captures.
 - Open-source infrastructure with explicit contracts for pricing-critical behavior.

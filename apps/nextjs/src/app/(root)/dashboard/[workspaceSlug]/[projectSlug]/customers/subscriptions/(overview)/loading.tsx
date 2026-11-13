@@ -36,9 +36,6 @@ export default function Loading() {
           <TabNavigationLink asChild active>
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
-          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">

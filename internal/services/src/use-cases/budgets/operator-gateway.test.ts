@@ -182,7 +182,7 @@ describe("HttpBudgetOperatorGateway.release", () => {
     const result = await gateway(rejected(409, "CONFLICT", closed)).gateway.release(release)
 
     expect(rejectionOf(result)).toEqual(closed)
-    expect(result.err?.message).toBe("Hold h_7 expired and was settled at its full amount")
+    expect(result.err?.message).toBe("Hold h_7 expired and was settled by the budget")
   })
 
   it("reads a 404 with the API's body as a missing hold", async () => {

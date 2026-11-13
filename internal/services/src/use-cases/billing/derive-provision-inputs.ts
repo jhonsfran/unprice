@@ -1,12 +1,24 @@
 import type { Database } from "@unprice/db"
-import {
-  type CreditLinePolicy,
-  type PlanVersionFeature,
-  type PlanVersionMetadata,
-  calculatePricePerFeature,
+import type {
+  CreditLinePolicy,
+  Currency,
+  PlanVersionFeature,
+  PlanVersionMetadata,
+  RateRow,
 } from "@unprice/db/validators"
-import { toLedgerMinor } from "@unprice/money"
+import { parseAmount } from "@unprice/money"
+import { priceQuantity } from "../../pricing"
+import type { RateCardService } from "../../rate-cards"
 import type { ActivationGrant } from "./provision-period"
+
+export type DeriveActivationInputsDeps = {
+  db: Database
+  rateCards: Pick<RateCardService, "rowsForVersions">
+}
+
+type AllowanceFeature = Pick<PlanVersionFeature, "featureType" | "limit" | "included"> & {
+  feature: { slug: string }
+}
 
 type SubscriptionRow = {
   id: string
@@ -16,8 +28,10 @@ type SubscriptionRow = {
     creditLinePolicy: CreditLinePolicy
     creditLineAmount: number | null
     planVersion: {
+      id: string
+      currency: Currency
       metadata: PlanVersionMetadata | null
-      planFeatures: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
+      planFeatures: AllowanceFeature[]
     } | null
   }>
 }
@@ -42,7 +56,9 @@ export interface DerivedActivationInputs {
  *    period usage runway.
  *
  *  - **`capped + creditLineAmount = null`**: derive a conservative cap from
- *    finite, priced usage limits by rating each usage feature at its limit.
+ *    finite, priced usage limits by pricing each usage feature's limit, past
+ *    its included units, with the dearest row of the plan version's rate card
+ *    (ADR-0008 D2).
  *
  *  - **`capped + creditLineAmount = 0`**: issue no runway; paid usage denies
  *    with `WALLET_EMPTY` unless purchased wallet balance exists.
@@ -54,11 +70,11 @@ export interface DerivedActivationInputs {
  * Returns `null` when the subscription / phase / plan version is missing.
  */
 export async function deriveActivationInputsFromPlan(
-  db: Database,
+  deps: DeriveActivationInputsDeps,
   input: { subscriptionId: string; projectId: string; phaseId?: string }
 ): Promise<DerivedActivationInputs | null> {
   const phaseId = input.phaseId
-  const sub = (await db.query.subscriptions.findFirst({
+  const sub = (await deps.db.query.subscriptions.findFirst({
     with: {
       customer: { columns: { id: true, defaultCurrency: true } },
       phases: {
@@ -72,9 +88,10 @@ export async function deriveActivationInputsFromPlan(
               planFeatures: {
                 columns: {
                   featureType: true,
-                  config: true,
                   limit: true,
+                  included: true,
                 },
+                with: { feature: { columns: { slug: true } } },
               },
             },
           },
@@ -106,7 +123,17 @@ export async function deriveActivationInputsFromPlan(
     })
   }
 
-  const allowanceAmount = derivePeriodUsageAllowanceAmount(phase)
+  const { planVersion } = phase
+  const rows =
+    phase.creditLinePolicy === "capped" && phase.creditLineAmount === null
+      ? ((await deps.rateCards.rowsForVersions(input.projectId, [planVersion], Date.now())).get(
+          planVersion.id
+        ) ?? [])
+      : []
+  const allowanceAmount = derivePeriodUsageAllowanceAmount({
+    ...phase,
+    planVersion: { ...phase.planVersion, rows },
+  })
 
   if (allowanceAmount > 0) {
     grants.push({
@@ -123,25 +150,31 @@ export function derivePeriodUsageAllowanceAmount(phase: {
   creditLinePolicy: CreditLinePolicy
   creditLineAmount: number | null
   planVersion?: {
-    planFeatures?: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
+    planFeatures?: AllowanceFeature[]
+    /** The plan version's card rows in effect now. */
+    rows?: readonly RateRow[]
   } | null
 }): number {
   if (phase.creditLinePolicy === "uncapped") return 0
   if (phase.creditLineAmount !== null) return phase.creditLineAmount
 
+  const rows = phase.planVersion?.rows ?? []
   return (phase.planVersion?.planFeatures ?? []).reduce((total, feature) => {
     if (feature.featureType !== "usage") return total
     if (!Number.isFinite(feature.limit) || !feature.limit || feature.limit <= 0) return total
 
-    const price = calculatePricePerFeature({
-      config: feature.config,
-      featureType: "usage",
-      quantity: feature.limit,
-    })
+    const included = feature.included ? parseAmount(feature.included) : null
+    const limit = parseAmount(String(feature.limit))
+    if (!limit.ok) return total
+    const billable = included?.ok ? limit.amount - included.amount : limit.amount
+    if (billable <= BigInt(0)) return total
 
-    if (price.err) return total
-
-    const amount = toLedgerMinor(price.val.totalPrice.dinero)
-    return amount > 0 ? total + amount : total
+    const amount = rows
+      .filter((row) => row.featureSlug === feature.feature.slug && row.price.type !== "flat")
+      .reduce((dearest, row) => {
+        const priced = priceQuantity(row, billable)
+        return priced > dearest ? priced : dearest
+      }, BigInt(0))
+    return amount > BigInt(0) ? total + Number(amount) : total
   }, 0)
 }

@@ -3,24 +3,41 @@ import {
   type BudgetInspectQuery,
   type BudgetInspectReply,
   type BudgetReply,
+  UnPriceBudgetError,
   deletableAt,
   inspect,
   isOutcomeOf,
   loadView,
   transition,
 } from "@unprice/services/budgets"
+import type { CardRows } from "@unprice/services/pricing"
 import type { BudgetRequest } from "@unprice/services/use-cases"
+import { JOURNAL_BATCH, journalRowOf } from "./journal"
 import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 
 export const ALARM_PURGE_LIMIT = 2048
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
+/**
+ * How often a closed budget checks unfinished statements and wallet reservations before deletion.
+ */
+export const UNFINISHED_BILLING_RECHECK_MS = 24 * 60 * 60_000
+/** How long written rows wait for the alarm that exports them, so one send carries many. */
+export const JOURNAL_EXPORT_DELAY_MS = 10_000
+/** The most journal batches one alarm sends; the alarm comes back for the rest. */
+export const JOURNAL_BATCHES_PER_ALARM = 4
 
 /** A command's reply, and the alarm its written rows need: a refused lease is written too. */
-type Committed = { reply: BudgetReply; wakeAt: number | null; now: number }
+type Committed = { reply: BudgetReply; wakeAt: number | null; now: number; wrote: boolean }
 
-/** What the alarm does after a sweep: wake again (or never), or delete the closed budget. */
-type Swept = { destroy: true } | { destroy: false; next: number | null }
+/** How an alarm's export went: everything sent, more left to send, or a failed send. */
+type Exported = "done" | "more" | "failed"
+
+/**
+ * What the alarm does after its export: wake again (or never), or delete the closed budget.
+ * `unexported`: rows the journal has yet to receive remain.
+ */
+type Swept = { destroy: true } | { destroy: false; next: number | null; unexported: boolean }
 
 /**
  * Business orchestration for one budget. Every command is one synchronous SQLite transaction
@@ -41,19 +58,72 @@ export class BudgetProcessor {
    */
   async initialize(): Promise<void> {
     this.armedAt = await this.deps.scheduler.getAlarm()
+    const now = this.deps.clock.now()
     await this.lowerAlarm(
       this.deps.store.atomically((tx) => {
         const budget = tx.readBudget()
-        return earliest(tx.nextDueAt(), budget && deletableAt(budget.config))
+        // Rows an eviction left unexported wake the alarm that sends them.
+        const unexported = tx.readUnexported(1).length > 0 ? this.exportAt(now) : null
+        return earliest(earliest(tx.nextDueAt(), budget && deletableAt(budget.config)), unexported)
       })
     )
   }
 
-  async execute(request: BudgetRequest): Promise<BudgetReply> {
+  async execute(request: BudgetRequest, cards?: readonly CardRows[]): Promise<BudgetReply> {
     const clockMs = this.deps.clock.now()
-    const { reply, wakeAt } = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
-    await this.lowerAlarm(wakeAt)
+    let committed: Committed
+    try {
+      committed = this.deps.store.atomically((tx) => {
+        if (cards) tx.cacheCards(cards, clockMs)
+        const result = commit(tx, request, clockMs)
+        if (cards && !result.reply.ok && result.reply.rejection.code === "CARDS_STALE") {
+          // An incomplete refresh must roll back its cache writes with the refused command.
+          throw new UnPriceBudgetError(result.reply.rejection)
+        }
+        return result
+      })
+    } catch (error) {
+      if (error instanceof UnPriceBudgetError && error.rejection.code === "CARDS_STALE") {
+        return { ok: false, rejection: error.rejection }
+      }
+      throw error
+    }
+    const { reply, wakeAt, wrote, now } = committed
+    await this.lowerAlarm(earliest(wakeAt, wrote ? this.exportAt(now) : null))
     return reply
+  }
+
+  /** When written rows reach the journal: after the batching delay, or never without a stream. */
+  private exportAt(now: number): number | null {
+    return this.deps.journal ? now + JOURNAL_EXPORT_DELAY_MS : null
+  }
+
+  /**
+   * Sends unexported rows in order and advances the cursor after each send. The send awaits
+   * outside any transaction: a command may write meanwhile, and its rows take later `seq`s.
+   */
+  private async exportJournal(): Promise<Exported> {
+    const { journal, store } = this.deps
+    if (!journal) return "done"
+    try {
+      for (let batch = 0; batch < JOURNAL_BATCHES_PER_ALARM; batch++) {
+        const pending = store.atomically((tx) => {
+          const budget = tx.readBudget()
+          if (!budget) return []
+          const entries = tx.readUnexported(JOURNAL_BATCH)
+          return entries.map((entry) => ({ entry, row: journalRowOf(budget, entry) }))
+        })
+        const last = pending[pending.length - 1]
+        if (!last) return "done"
+        await journal.send(pending.map(({ row }) => row))
+        store.atomically((tx) => tx.markExported(last.entry.seq))
+        if (pending.length < JOURNAL_BATCH) return "done"
+      }
+      return "more"
+    } catch (error) {
+      this.deps.logger.error("budget journal export failed", { error: errorMessage(error) })
+      return "failed"
+    }
   }
 
   /** Whether the storage holds a budget, as opposed to a schema a refused first call left. */
@@ -84,18 +154,27 @@ export class BudgetProcessor {
     this.armedAt = null
     this.pendingAt = null
     const now = this.deps.clock.now()
-    let swept: Swept
+    let next: number | null
     try {
-      swept = this.deps.store.atomically((tx) => sweep(tx, now))
+      // The sweep's rows go out with this alarm's export, and the purge after it drops what the
+      // export sent.
+      const sweptAt = this.deps.store.atomically((tx) => sweep(tx, now))
+      const exported = await this.exportJournal()
+      const swept = this.deps.store.atomically((tx) => afterExport(tx, sweptAt))
+      if (swept.destroy) {
+        await this.deps.runtime.destroy()
+        return
+      }
+      const exportNext = {
+        done: swept.unexported ? this.exportAt(now) : null,
+        more: now + ALARM_CONTINUE_MS,
+        failed: now + ALARM_RETRY_MS,
+      }[exported]
+      next = earliest(swept.next, exportNext)
     } catch (error) {
       this.deps.logger.error("budget alarm failed", { error: errorMessage(error) })
-      swept = { destroy: false, next: now + ALARM_RETRY_MS }
+      next = now + ALARM_RETRY_MS
     }
-    if (swept.destroy) {
-      await this.deps.runtime.destroy()
-      return
-    }
-    const { next } = swept
     if (next === null) return
     try {
       await this.lowerAlarm(next)
@@ -126,7 +205,8 @@ function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Com
   const result = transition({ view, command, clockMs })
   // Nothing was written. Only the sweep reads `now`, and a sweep is never rejected.
   if (result.err) {
-    return { reply: { ok: false, rejection: result.err.rejection }, wakeAt: null, now: clockMs }
+    const reply: BudgetReply = { ok: false, rejection: result.err.rejection }
+    return { reply, wakeAt: null, now: clockMs, wrote: false }
   }
 
   const { write, now, wakeAt } = result.val
@@ -134,30 +214,43 @@ function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Com
   const reply: BudgetReply = result.val.ok
     ? { ok: true, outcome: result.val.outcome }
     : { ok: false, rejection: result.val.rejection }
-  return { reply, wakeAt: write ? wakeAt : null, now }
+  const wrote = write && result.val.operations.length > 0
+  return { reply, wakeAt: write ? wakeAt : null, now, wrote }
+}
+
+/** Settles expired reservations. Returns the clock the sweep moved the budget to, or null. */
+function sweep(tx: BudgetStoreTx, clockMs: number): number | null {
+  if (tx.readBudget() === null) return null
+  const swept = commit(tx, { type: "sweep" }, clockMs)
+  if (!swept.reply.ok) throw new Error(`budget sweep rejected: ${swept.reply.rejection.code}`)
+  return swept.now
 }
 
 /**
- * Settles expired holds and purges closed rows. Returns the next wake, null for none, or that a
- * budget closed for CLOSED_BUDGET_RETENTION_MS with no row left can delete its storage.
+ * Purges exported closed rows. Returns the next wake, null for none, or that a budget closed for
+ * CLOSED_BUDGET_RETENTION_MS with no row left can delete its storage.
  */
-function sweep(tx: BudgetStoreTx, clockMs: number): Swept {
+function afterExport(tx: BudgetStoreTx, sweptAt: number | null): Swept {
   const budget = tx.readBudget()
-  if (budget === null) return { destroy: false, next: null }
-  const swept = commit(tx, { type: "sweep" }, clockMs)
-  if (!swept.reply.ok) throw new Error(`budget sweep rejected: ${swept.reply.rejection.code}`)
-  // The sweep moved the budget's clock to `now`, so purging at it never runs ahead of a command.
-  tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)
+  if (budget === null || sweptAt === null) return { destroy: false, next: null, unexported: false }
+  // The sweep moved the budget's clock to `sweptAt`, so purging at it never runs ahead of a command.
+  tx.purgeOperations(sweptAt, ALARM_PURGE_LIMIT)
   const due = tx.nextDueAt()
   const deletable = deletableAt(budget.config)
-  if (due === null && deletable !== null && swept.now >= deletable) return { destroy: true }
+  // A row the journal has not received keeps the storage: deleting it would lose the row.
+  const unexported = tx.readUnexported(1).length > 0
+  if (due === null && !unexported && deletable !== null && sweptAt >= deletable) {
+    if (!tx.hasOpenFunding() && !tx.hasUnfinishedStatements()) return { destroy: true }
+    return { destroy: false, next: sweptAt + UNFINISHED_BILLING_RECHECK_MS, unexported }
+  }
   // Work a capped batch left behind is already due, so the floor is also the continuation delay,
   // and it keeps a row the sweep cannot clear from spinning the alarm. A deletion already due
   // waits for the rows instead.
-  const rows = due === null ? null : Math.max(due, swept.now + ALARM_CONTINUE_MS)
+  const rows = due === null ? null : Math.max(due, sweptAt + ALARM_CONTINUE_MS)
   return {
     destroy: false,
-    next: earliest(rows, deletable !== null && deletable > swept.now ? deletable : null),
+    next: earliest(rows, deletable !== null && deletable > sweptAt ? deletable : null),
+    unexported,
   }
 }
 

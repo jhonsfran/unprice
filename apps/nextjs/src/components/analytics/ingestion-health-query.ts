@@ -7,7 +7,7 @@ export const DEFAULT_INGESTION_HEALTH_WINDOW_MS = 60 * 60 * 1000
 // freshness indicator and the events panel's auto-refresh so the cadence stays in one place.
 export const ANALYTICS_REFRESH_INTERVAL_MS = 30_000
 
-export type IngestionStatusInput = RouterInputs["analytics"]["getIngestionStatus"]
+export type IngestionStatusInput = RouterInputs["analytics"]["getIngestionSummary"]
 
 export function buildRollingIngestionWindow(
   now: number,

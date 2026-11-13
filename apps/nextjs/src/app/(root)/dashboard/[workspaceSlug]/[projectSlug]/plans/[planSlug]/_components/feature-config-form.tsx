@@ -1,18 +1,14 @@
 "use client"
 
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import type { RouterOutputs } from "@unprice/trpc/routes"
+
 import { Info, Lock, Settings } from "lucide-react"
-import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useUpdatePlanFeature } from "~/components/pricing/use-update-plan-feature"
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
 
 import { DOCS_DOMAIN } from "@unprice/config"
-import {
-  OVERAGE_STRATEGIES_MAP,
-  TIER_MODES,
-  TIER_MODES_MAP,
-  USAGE_MODES,
-  USAGE_MODES_MAP,
-} from "@unprice/db/utils"
+import { OVERAGE_STRATEGIES_MAP } from "@unprice/db/utils"
 import type { FeatureType } from "@unprice/db/utils"
 import type {
   PlanVersion,
@@ -27,109 +23,68 @@ import {
 import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Switch } from "@unprice/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 
 import { SubmitButton } from "~/components/submit-button"
 import { SuperLink } from "~/components/super-link"
-import { useActiveFeature, useIsOnboarding, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
-import { useTRPC } from "~/trpc/client"
 
+import { priceStateOf } from "~/components/pricing/plan-prices"
+import { CollapsibleSection, NumberedStep } from "~/components/pricing/section-label"
 import { FeatureDialog } from "../../_components/feature-dialog"
-import {
-  BillingConfigFeatureFormField,
-  LimitFormField,
-  OverageStrategyFormField,
-  PriceFormField,
-  QuantityFormField,
-  ResetConfigFeatureFormField,
-  TierFormField,
-  UnitsFormField,
-} from "./fields-form"
-import { MeterConfigFormField } from "./meter-config-form-field"
+import type { CreatedFeature } from "../../_components/feature-form"
+import { ConfigureFields } from "./feature-config-fields"
+import { BillingConfigFeatureFormField, OverageStrategyFormField } from "./fields-form"
+import { type PriceDraft, emptyDraft, priceInputOf } from "./price-block"
 import { PricingModelPicker, getConfigureSubtitle } from "./pricing-model"
-import { CollapsibleSection, NumberedStep } from "./section-label"
-
-// Plain-English overrides for the usageMode picker. Falls back to USAGE_MODES_MAP[m].label.
-const USAGE_MODE_FRIENDLY_LABEL: Record<string, string> = {
-  unit: "Per unit",
-  tier: "Tiered",
-  package: "Per bundle",
-}
 
 export function FeatureConfigForm({
   setDialogOpen,
   defaultValues,
   planVersion,
-  planFeatures,
+  onSaved,
+  onFeatureUpdated,
   className,
 }: {
   defaultValues: PlanVersionFeatureInsert | PlanVersionFeature | PlanVersionFeatureDragDrop
   planVersion: PlanVersion | null
-  // When provided (e.g. the customer entitlement sheet), the form runs standalone and does
-  // NOT mutate the shared plan-editor atoms. Left undefined on the plans page, where the atoms
-  // remain the source of truth for the inline editor's feature list.
-  planFeatures?: PlanVersionFeatureDragDrop[]
+  onSaved?: (feature: RouterOutputs["planVersionFeatures"]["update"]["planVersionFeature"]) => void
+  onFeatureUpdated?: (feature: CreatedFeature) => void
   setDialogOpen?: (open: boolean) => void
   className?: string
 }) {
-  const router = useRouter()
-  const [, setPlanFeatureList] = usePlanFeaturesList()
-  const [isOnboarding] = useIsOnboarding()
-  const [activeFeature] = useActiveFeature()
-  const isStandalone = planFeatures !== undefined
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
-  const currency = planVersion?.currency ?? "USD"
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [isDisplayOpen, setIsDisplayOpen] = useState(false)
+  const [priceDraft, setPriceDraft] = useState<PriceDraft | null>(null)
+  const [priceProblem, setPriceProblem] = useState<string | null>(null)
   const feature = "feature" in defaultValues ? defaultValues.feature : undefined
   const featureMeterTemplate = feature?.meterConfig
+
+  const featureSlug = feature?.slug ?? ""
+
+  // ADR-0008 D2: the price is a row on the version's card, read beside the package it prices.
+  const {
+    card,
+    rows,
+    isLoading: isPricingLoading,
+    now: pricingNow,
+  } = useVersionPricing(planVersion?.id, planVersion?.currency)
+  const priceRows = rows.get(featureSlug)
 
   // Pre-populate every nested field so react-hook-form has a defined value to register against.
   const controlledDefaultValues = {
     ...defaultValues,
     config: {
       ...defaultValues.config,
-      tiers: defaultValues.config?.tiers ?? [
-        {
-          firstUnit: 1,
-          lastUnit: null,
-          unitPrice: {
-            displayAmount: "0.00",
-            dinero: {
-              amount: 0,
-              currency: {
-                code: currency,
-                base: 10,
-                exponent: 2,
-              },
-              scale: 2,
-            },
-          },
-          flatPrice: {
-            displayAmount: "0.00",
-            dinero: {
-              amount: 0,
-              currency: {
-                code: currency,
-                base: 10,
-                exponent: 2,
-              },
-              scale: 2,
-            },
-          },
-        },
-      ],
-      usageMode: defaultValues.config?.usageMode ?? "tier",
-      tierMode: defaultValues.config?.tierMode ?? "volume",
+      // A new metered feature starts as one price per unit; tiers and bundles are a choice.
+      usageMode:
+        defaultValues.config?.usageMode ??
+        (defaultValues.featureType === "usage" ? "unit" : "tier"),
       units: defaultValues.config?.units ?? 1,
     },
     billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
@@ -176,40 +131,32 @@ export function FeatureConfigForm({
     defaultValues: controlledDefaultValues as PlanVersionFeatureInsert,
   })
 
-  const updatePlanVersionFeatures = useMutation(
-    trpc.planVersionFeatures.update.mutationOptions({
-      onSuccess: ({ planVersionFeature }) => {
-        // Only the plans-page editor tracks the shared feature list; the standalone sheet
-        // must not clobber another page's plan-editor state.
-        if (!isStandalone) {
-          setPlanFeatureList((features) => {
-            const index = features.findIndex(
-              (feat) => feat.featureId === planVersionFeature.featureId
-            )
-            features[index] = planVersionFeature
-            return features
-          })
-        }
-
-        form.reset(planVersionFeature)
-        toastAction("saved")
-        setDialogOpen?.(false)
-        router.refresh()
-
-        if (!isOnboarding) {
-          void queryClient.invalidateQueries({
-            queryKey: trpc.planVersions.getById.queryKey(),
-          })
-        }
-      },
-    })
-  )
+  const updatePlanVersionFeatures = useUpdatePlanFeature({
+    currency: planVersion?.currency,
+    onSaved: (planVersionFeature) => {
+      onSaved?.(planVersionFeature)
+      form.reset(planVersionFeature)
+      setPriceDraft(null)
+      setPriceProblem(null)
+      toastAction("saved")
+      setDialogOpen?.(false)
+    },
+  })
+  const updateOptions = {
+    onError: (error, variables) => {
+      if (variables.price !== undefined && error.data?.domainCode === "CARD_SHARED") {
+        setPriceProblem(error.message)
+        return
+      }
+      toastAction("error", error.message, { requestId: error.data?.requestId })
+    },
+  } satisfies Parameters<typeof updatePlanVersionFeatures.mutate>[1]
 
   // When client-side validation fails, auto-open the collapsible that contains the offending
   // field so the inline FormMessage is visible. We do NOT toast — zod's per-field error already
   // renders next to the input via FormMessage, and a generic toast is noise.
   const onInvalidSubmit = (errors: Record<string, unknown>) => {
-    if (errors.billingConfig || errors.resetConfig) setIsAdvancedOpen(true)
+    if (errors.billingConfig) setIsAdvancedOpen(true)
     if (
       errors.metadata &&
       typeof errors.metadata === "object" &&
@@ -221,107 +168,47 @@ export function FeatureConfigForm({
     }
   }
 
-  // Reset form when the active feature changes (different card expanded).
-  useEffect(() => {
-    form.reset(controlledDefaultValues)
-    // intentionally narrow deps — see existing behavior
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultValues.id])
-
   const featureType = form.watch("featureType") as FeatureType | undefined
   const usageMode = form.watch("config.usageMode")
   const billingConfigName = form.watch("billingConfig.name")
-  const resetConfigName = form.watch("resetConfig.name")
   const overage = form.watch("metadata.overageStrategy") ?? "none"
   const isHidden = form.watch("metadata.hidden") ?? false
+  const defaultQuantity = Number(form.watch("defaultQuantity") ?? 0)
+  const included = Number(form.watch("included") ?? 0)
+  // What a new tiers draft gives away at $0: the quantity picked at signup, or the included units.
+  const includedUnits =
+    featureType === "tier" ? defaultQuantity : featureType === "usage" ? included : 0
+
+  // A fixed feature the card has no row for is saved at $0, the block's starting amount, so one
+  // Save makes it an included feature; the rows must be loaded to know it has none.
+  const impliedDraft =
+    featureType === "flat" &&
+    !isPublished &&
+    pricingNow > 0 &&
+    priceStateOf(priceRows) === "unpriced"
+      ? emptyDraft("flat")
+      : null
 
   const onSubmitForm = async (data: PlanVersionFeatureInsert) => {
-    if (defaultValues.id) {
-      await updatePlanVersionFeatures.mutateAsync({
+    if (!defaultValues.id) return
+    const draft = priceDraft ?? impliedDraft
+    const built = draft ? priceInputOf(draft) : null
+    if (built && !built.ok) {
+      setPriceProblem(built.message)
+      return
+    }
+    setPriceProblem(null)
+    await updatePlanVersionFeatures.mutateAsync(
+      {
         ...data,
         id: defaultValues.id,
-      })
-    }
-  }
-
-  // Convert a displayAmount string ("10.00") into the dinero shape the schema expects.
-  // Inputs only write displayAmount — we derive the canonical numeric representation here
-  // so the schema's `price.dinero: Required` check is satisfied.
-  const toDineroShape = (displayAmount: unknown) => {
-    const raw =
-      typeof displayAmount === "number"
-        ? displayAmount
-        : typeof displayAmount === "string"
-          ? Number.parseFloat(displayAmount)
-          : Number.NaN
-    if (!Number.isFinite(raw)) return undefined
-    const exponent = 2
-    return {
-      amount: Math.round(raw * 10 ** exponent),
-      currency: { code: currency, base: 10, exponent },
-      scale: exponent,
-    }
-  }
-
-  // Force tier `firstUnit` values to be continuous (1 → prev.lastUnit + 1) AND keep every
-  // displayAmount in sync with its dinero counterpart BEFORE the resolver runs.
-  const normalizeBeforeSubmit = () => {
-    // Tier firstUnit continuity (we dropped the firstUnit input from the table)
-    const tiers = form.getValues("config.tiers")
-    if (Array.isArray(tiers)) {
-      tiers.forEach((_, i) => {
-        const expected =
-          i === 0
-            ? 1
-            : (() => {
-                const raw = form.getValues(`config.tiers.${i - 1}.lastUnit`)
-                const parsed = Number(raw)
-                return Number.isFinite(parsed) ? parsed + 1 : undefined
-              })()
-        if (typeof expected === "number") {
-          form.setValue(`config.tiers.${i}.firstUnit`, expected, {
-            shouldValidate: false,
-            shouldDirty: false,
-          })
-        }
-      })
-
-      // Sync each tier's flatPrice.dinero and unitPrice.dinero from their displayAmount
-      tiers.forEach((_, i) => {
-        const flatDisp = form.getValues(`config.tiers.${i}.flatPrice.displayAmount`)
-        const flatDinero = toDineroShape(flatDisp)
-        if (flatDinero) {
-          form.setValue(`config.tiers.${i}.flatPrice.dinero`, flatDinero, {
-            shouldValidate: false,
-            shouldDirty: false,
-          })
-        }
-        const unitDisp = form.getValues(`config.tiers.${i}.unitPrice.displayAmount`)
-        const unitDinero = toDineroShape(unitDisp)
-        if (unitDinero) {
-          form.setValue(`config.tiers.${i}.unitPrice.dinero`, unitDinero, {
-            shouldValidate: false,
-            shouldDirty: false,
-          })
-        }
-      })
-    }
-
-    // Sync top-level config.price.dinero from displayAmount (flat / package / usage>unit / usage>package)
-    const priceDisp = form.getValues("config.price.displayAmount")
-    if (typeof priceDisp !== "undefined") {
-      const dinero = toDineroShape(priceDisp)
-      if (dinero) {
-        form.setValue("config.price.dinero", dinero, {
-          shouldValidate: false,
-          shouldDirty: false,
-        })
-      }
-    }
+        ...(built ? { price: built.price } : {}),
+      },
+      updateOptions
+    )
   }
 
   const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    normalizeBeforeSubmit()
     void form.handleSubmit(onSubmitForm, onInvalidSubmit)(e)
   }
 
@@ -335,9 +222,6 @@ export function FeatureConfigForm({
     if (billingConfigName && billingConfigName !== planVersion.billingConfig.name) {
       parts.push(`Bill: ${billingConfigName}`)
     }
-    if (resetConfigName && resetConfigName !== planVersion.billingConfig.name) {
-      parts.push(`Reset: ${resetConfigName}`)
-    }
     if (overage !== "none") {
       parts.push(OVERAGE_STRATEGIES_MAP[overage]?.label ?? overage)
     }
@@ -350,7 +234,7 @@ export function FeatureConfigForm({
   // Derive per-section error state so collapsed sections can flag unresolved validation issues.
   const fieldErrors = form.formState.errors
   const hasAdvancedError = Boolean(
-    fieldErrors.billingConfig || fieldErrors.resetConfig || fieldErrors.metadata?.overageStrategy
+    fieldErrors.billingConfig || fieldErrors.metadata?.overageStrategy
   )
   const hasDisplayError = Boolean(fieldErrors.metadata?.hidden)
 
@@ -400,6 +284,9 @@ export function FeatureConfigForm({
                     if (isPublished) return
                     field.onChange(value)
                     if (value === "usage") {
+                      if (field.value !== "usage") {
+                        form.setValue("config.usageMode", "unit", { shouldDirty: true })
+                      }
                       const current = form.getValues("meterConfig")
                       form.setValue("meterConfig", current ?? featureMeterTemplate ?? undefined)
                     } else {
@@ -422,11 +309,26 @@ export function FeatureConfigForm({
         >
           <ConfigureFields
             form={form}
-            currency={planVersion.currency}
-            unitOfMeasure={defaultValues.unitOfMeasure ?? activeFeature?.unitOfMeasure ?? "units"}
+            planVersion={planVersion}
+            featureSlug={featureSlug}
+            unitOfMeasure={defaultValues.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
             featureType={featureType}
             usageMode={usageMode}
+            feature={feature}
+            onFeatureUpdated={onFeatureUpdated}
+            card={card}
+            priceRows={priceRows}
+            isPricingLoading={isPricingLoading}
+            pricingNow={pricingNow}
+            priceDraft={priceDraft}
+            onPriceDraftChange={(draft) => {
+              setPriceDraft(draft)
+              setPriceProblem(null)
+            }}
+            priceProblem={priceProblem}
+            savedDimensions={defaultValues.meterConfig?.groupBy ?? []}
+            includedUnits={includedUnits}
           />
         </NumberedStep>
 
@@ -443,7 +345,6 @@ export function FeatureConfigForm({
               >
                 <div className="space-y-4">
                   <BillingConfigFeatureFormField form={form} isDisabled={isPublished} />
-                  <ResetConfigFeatureFormField form={form} isDisabled={isPublished} />
                   <OverageStrategyFormField form={form} isDisabled={isPublished} />
                 </div>
               </CollapsibleSection>
@@ -521,201 +422,5 @@ export function FeatureConfigForm({
         )}
       </form>
     </Form>
-  )
-}
-
-// ─── contextual configure fields per pricing model ───────────────────────
-function ConfigureFields({
-  form,
-  currency,
-  unitOfMeasure,
-  isDisabled,
-  featureType,
-  usageMode,
-}: {
-  // biome-ignore lint/suspicious/noExplicitAny: react-hook-form's UseFormReturn type doesn't narrow well across schema unions
-  form: any
-  currency: PlanVersion["currency"]
-  unitOfMeasure: string
-  isDisabled?: boolean
-  featureType: FeatureType | undefined
-  usageMode: string | undefined
-}) {
-  if (!featureType) {
-    return (
-      <p className="text-muted-foreground text-sm italic">Pick a pricing model above to start.</p>
-    )
-  }
-
-  if (featureType === "flat") {
-    return <PriceFormField form={form} currency={currency} isDisabled={isDisabled} />
-  }
-
-  if (featureType === "package") {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <PriceFormField
-            form={form}
-            currency={currency}
-            isDisabled={isDisabled}
-            label="Price per bundle"
-          />
-          <UnitsFormField form={form} isDisabled={isDisabled} />
-        </div>
-        <QuantityFormField form={form} isDisabled={isDisabled} />
-      </div>
-    )
-  }
-
-  if (featureType === "tier") {
-    return (
-      <div className="space-y-4">
-        <ModeSelect
-          form={form}
-          name="config.tierMode"
-          label="Tier mode"
-          tooltip="How tiered prices apply to the chosen quantity."
-          isDisabled={isDisabled}
-          options={TIER_MODES.map((m) => ({
-            value: m,
-            label: TIER_MODES_MAP[m].label,
-            description: TIER_MODES_MAP[m].description,
-          }))}
-        />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <QuantityFormField form={form} isDisabled={isDisabled} />
-          <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
-        </div>
-        <TierFormField form={form} currency={currency} isDisabled={isDisabled} />
-      </div>
-    )
-  }
-
-  // usage
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <ModeSelect
-          form={form}
-          name="config.usageMode"
-          label="Charge customers"
-          tooltip="How consumed usage maps to a price."
-          isDisabled={isDisabled}
-          options={USAGE_MODES.map((m) => ({
-            value: m,
-            label: USAGE_MODE_FRIENDLY_LABEL[m] ?? USAGE_MODES_MAP[m].label,
-            description: USAGE_MODES_MAP[m].description,
-          }))}
-        />
-        {usageMode === "tier" && (
-          <ModeSelect
-            form={form}
-            name="config.tierMode"
-            label="Tier mode"
-            tooltip="How tiered usage prices apply."
-            isDisabled={isDisabled}
-            options={TIER_MODES.map((m) => ({
-              value: m,
-              label: TIER_MODES_MAP[m].label,
-              description: TIER_MODES_MAP[m].description,
-            }))}
-          />
-        )}
-      </div>
-
-      {/* Meter is required for usage features — render inline so its errors are always visible */}
-      <div className="space-y-3 rounded-md border bg-background-bgSubtle/40 p-3">
-        <div className="flex items-center gap-1.5">
-          <h5 className="font-semibold text-foreground text-xs uppercase tracking-wider">Meter</h5>
-          <span className="text-muted-foreground text-xs normal-case tracking-normal">
-            required
-          </span>
-        </div>
-        <MeterConfigFormField form={form} isDisabled={isDisabled} />
-      </div>
-
-      <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
-
-      {usageMode === "unit" && (
-        <PriceFormField
-          form={form}
-          currency={currency}
-          isDisabled={isDisabled}
-          label="Price per unit"
-        />
-      )}
-      {usageMode === "tier" && (
-        <TierFormField form={form} currency={currency} isDisabled={isDisabled} />
-      )}
-      {usageMode === "package" && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <PriceFormField
-            form={form}
-            currency={currency}
-            isDisabled={isDisabled}
-            label="Price per bundle"
-          />
-          <UnitsFormField form={form} isDisabled={isDisabled} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── small inline mode select used for tierMode / usageMode ──────────────
-function ModeSelect({
-  form,
-  name,
-  label,
-  tooltip,
-  options,
-  isDisabled,
-}: {
-  // biome-ignore lint/suspicious/noExplicitAny: shared FormField shape
-  form: any
-  name: string
-  label: string
-  tooltip?: string
-  options: Array<{ value: string; label: string; description?: string }>
-  isDisabled?: boolean
-}) {
-  return (
-    <FormField
-      control={form.control}
-      name={name}
-      render={({ field }: { field: { value: string; onChange: (v: string) => void } }) => (
-        <FormItem className="space-y-1">
-          <div className="flex items-center gap-1.5">
-            <FormLabel className="text-xs">{label}</FormLabel>
-            {tooltip && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <HelpCircle className="size-3 text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-[260px]">
-                  {tooltip}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-          <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
-            <FormControl>
-              <SelectTrigger className="h-8" disabled={isDisabled}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-            </FormControl>
-            <SelectContent className="text-xs">
-              {options.map((opt) => (
-                <SelectItem value={opt.value} key={opt.value} description={opt.description}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FormMessage />
-        </FormItem>
-      )}
-    />
   )
 }

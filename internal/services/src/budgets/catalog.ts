@@ -21,10 +21,11 @@ export function catalogFactsFrom(
   budget: Pick<BudgetCatalogFacts, "key" | "unit" | "version" | "closesAt"> &
     Readonly<{ limits: readonly BudgetCatalogLimit[] }>
 ): BudgetCatalogFacts {
-  const limits = budget.limits.map(({ id, window, enforce, amount }) => ({
+  const limits = budget.limits.map(({ id, window, enforce, feature, amount }) => ({
     id,
     window,
     enforce,
+    ...(feature !== undefined && { feature }),
     amount,
   }))
   return {

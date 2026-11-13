@@ -1,4 +1,4 @@
-import { prepareInterval } from "@unprice/analytics"
+import { prepareInterval } from "@unprice/db/validators"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { buildIngestionHealthInput } from "~/components/analytics/ingestion-health-query"
@@ -24,7 +24,7 @@ export default async function DashboardOverview(props: {
   const healthInput = buildIngestionHealthInput({ now, intervalMs: interval.intervalMs })
 
   batchPrefetch([
-    trpc.analytics.getIngestionStatus.queryOptions(healthInput, {
+    trpc.analytics.getIngestionSummary.queryOptions(healthInput, {
       staleTime: 15 * 1000,
     }),
     trpc.analytics.getUsageDashboard.queryOptions(

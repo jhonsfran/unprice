@@ -17,6 +17,8 @@ import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { UnPriceRateCardError } from "../../rate-cards"
+import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import type { MaterializeContext } from "../plan-template/materialize"
 import {
   type ApplyMonetizationConfigOutput,
@@ -146,6 +148,9 @@ function createHarness() {
     events: [] as Event[],
     versions: [] as StoredPlanVersion[],
   }
+  const cards = createRateCardsFake(
+    (id) => store.versions.find((version) => version.id === id)?.planFeatures ?? []
+  )
   /** Lets a test crash one write without restating the whole fake. */
   const control = {
     failFeatureWrite: null as null | ((input: CreatePlanVersionFeatureInput) => FetchError | null),
@@ -417,9 +422,15 @@ function createHarness() {
       createPlanVersionFeatureRecord,
       updatePlanVersionFeatureRecord,
     },
-    features: { getFeatureBySlug, createFeatureRecord, updateFeatureRecord },
+    features: {
+      getFeatureBySlug,
+      createFeatureRecord,
+      updateFeatureRecord,
+      listFeaturesByProject: vi.fn(async () => Ok([])),
+    },
     events: { listEventsByProject, createEvent, updateEvent },
-  } as unknown as Pick<ServiceContext, "plans" | "features" | "events">
+    rateCards: cards.rateCards,
+  } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">
 
   const { logger, info: wideEvent } = createLogger()
 
@@ -428,6 +439,7 @@ function createHarness() {
     control,
     defaultHolders,
     wideEvent,
+    cards,
     deps: { services, db, logger },
     spies: {
       insert,
@@ -444,6 +456,23 @@ function createHarness() {
       updateEvent,
     },
   }
+}
+
+/** The open price of a feature on the card a plan version prices with. */
+function cardPrice(
+  cards: ReturnType<typeof createRateCardsFake>,
+  planVersionId: string,
+  featureSlug: string
+) {
+  const assigned = cards.rateCards.assignToPlanVersion.mock.calls.find(
+    ([, input]) => input.planVersionId === planVersionId
+  )
+  return cards.rows.find(
+    (row) =>
+      row.rateCardId === assigned?.[1].cardId &&
+      row.featureSlug === featureSlug &&
+      row.effectiveTo === null
+  )?.price
 }
 
 function baseConfig(): MonetizationConfigInput {
@@ -632,7 +661,7 @@ function seedVersion(
 
 describe("applyMonetizationConfig", () => {
   it("creates events, features, plans, and one draft version per plan in an empty project", async () => {
-    const { deps, store } = createHarness()
+    const { deps, store, cards } = createHarness()
 
     const result = await applyMonetizationConfig(deps, {
       projectId: PROJECT_ID,
@@ -675,10 +704,16 @@ describe("applyMonetizationConfig", () => {
       eventSlug: "chat_request",
       aggregationMethod: "count",
     })
-    // The boundary speaks decimal strings; the stored snapshot has to be Dinero.
-    expect(metered?.config).toMatchObject({
-      usageMode: "unit",
-      price: { displayAmount: "0.01", dinero: { amount: 1, scale: 2 } },
+    // The plan feature stores no price; the decimal becomes a row of the version's own card.
+    expect(metered?.config).toEqual({ usageMode: "unit" })
+    expect(cardPrice(cards, "plan_version_1", "chat-messages")).toEqual({
+      type: "unit",
+      components: [{ property: null, rate: BigInt(1_000_000), per: 1 }],
+    })
+    expect(cards.rateCards.assignToPlanVersion).toHaveBeenCalledWith(PROJECT_ID, {
+      planVersionId: "plan_version_1",
+      currency: "USD",
+      cardId: expect.any(String),
     })
     expect(metered?.featureType).toBe("usage")
     expect(metered?.limit).toBe(20)
@@ -742,7 +777,7 @@ describe("applyMonetizationConfig", () => {
   })
 
   it("creates a new draft for a price change and leaves the published version untouched", async () => {
-    const { deps, store, spies } = createHarness()
+    const { deps, store, spies, cards } = createHarness()
 
     const first = expectApplied(
       await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
@@ -753,9 +788,7 @@ describe("applyMonetizationConfig", () => {
     if (!published) throw new Error("missing the version the first apply reported")
     published.status = "published"
     const publishedFeatureCount = published.planFeatures.length
-    const publishedPrice = published.planFeatures.find(
-      ({ feature }) => feature.slug === "chat-messages"
-    )?.config
+    const publishedPrice = cardPrice(cards, published.id, "chat-messages")
 
     const repriced = baseConfig()
     const meteredFeature = repriced.plans[0]?.version.features[1]
@@ -776,9 +809,7 @@ describe("applyMonetizationConfig", () => {
     // Untouched and still live.
     expect(published.status).toBe("published")
     expect(published.planFeatures).toHaveLength(publishedFeatureCount)
-    expect(
-      published.planFeatures.find(({ feature }) => feature.slug === "chat-messages")?.config
-    ).toEqual(publishedPrice)
+    expect(cardPrice(cards, published.id, "chat-messages")).toEqual(publishedPrice)
     expect(
       spies.createPlanVersionFeatureRecord.mock.calls.filter(
         ([input]) => input.planVersionId === published.id
@@ -787,9 +818,10 @@ describe("applyMonetizationConfig", () => {
 
     const draft = store.versions.find(({ id }) => id === second.plans[0]?.planVersionId)
     expect(draft?.status).toBe("draft")
-    expect(
-      draft?.planFeatures.find(({ feature }) => feature.slug === "chat-messages")?.config
-    ).toMatchObject({ price: { displayAmount: "0.02" } })
+    expect(draft && cardPrice(cards, draft.id, "chat-messages")).toEqual({
+      type: "unit",
+      components: [{ property: null, rate: BigInt(2_000_000), per: 1 }],
+    })
   })
 
   it("finishes a half-materialized draft on the next apply without creating a duplicate version", async () => {
@@ -838,6 +870,87 @@ describe("applyMonetizationConfig", () => {
     ).toHaveLength(1)
     expect(resumed.plans.map(({ status }) => status)).toEqual(["created", "created"])
     expect(resumed.staleDrafts).toEqual([])
+  })
+
+  it("prices a complete draft whose first row publication failed, reusing its assigned card", async () => {
+    const { deps, store, cards } = createHarness()
+
+    // Every feature is written, the card is created, then its rows fail to publish.
+    cards.rateCards.publishRows.mockImplementationOnce(async () =>
+      Err(
+        new UnPriceRateCardError({
+          code: "SCHEDULE_CONFLICT",
+          featureSlug: "support",
+          scheduledFrom: 0,
+        })
+      )
+    )
+    const failed = await applyMonetizationConfig(deps, {
+      projectId: PROJECT_ID,
+      config: baseConfig(),
+    })
+
+    expect(failed.err?.message).toBe(
+      'error pricing plan "free" on its rate card: support already has a price scheduled from 1970-01-01T00:00:00.000Z; a change must start after it'
+    )
+    expect(store.versions).toHaveLength(1)
+    expect(store.versions[0]?.planFeatures.map(({ feature }) => feature.slug)).toEqual([
+      "support",
+      "chat-messages",
+    ])
+    expect([...cards.cards.values()].map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: "rc_1", name: "free plan_version_1 USD" },
+    ])
+    expect(cards.assignments.get("plan_version_1:USD")).toBe("rc_1")
+    expect(cards.rows).toEqual([])
+
+    const resumed = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+
+    // The complete draft is unchanged, but this apply priced it on the card the failed run made.
+    expect(resumed.plans[0]).toEqual({
+      slug: "free",
+      planVersionId: "plan_version_1",
+      status: "unchanged",
+    })
+    expect(cards.rateCards.assignToPlanVersion).toHaveBeenCalledWith(PROJECT_ID, {
+      planVersionId: "plan_version_1",
+      currency: "USD",
+      cardId: "rc_1",
+    })
+    expect(
+      cards.rows
+        .filter((row) => row.rateCardId === "rc_1")
+        .map(({ featureSlug, price, effectiveTo }) => ({ featureSlug, price, effectiveTo }))
+    ).toEqual([
+      { featureSlug: "support", price: { type: "flat", amount: BigInt(0) }, effectiveTo: null },
+      {
+        featureSlug: "chat-messages",
+        price: { type: "unit", components: [{ property: null, rate: BigInt(1_000_000), per: 1 }] },
+        effectiveTo: null,
+      },
+    ])
+
+    // A rerun with the same prices writes nothing.
+    const rowCount = cards.rows.length
+    cards.rateCards.createCard.mockClear()
+    cards.rateCards.assignToPlanVersion.mockClear()
+    cards.rateCards.publishRows.mockClear()
+    expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+
+    expect(cards.rateCards.createCard).not.toHaveBeenCalled()
+    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
+    expect(cards.rows).toHaveLength(rowCount)
+    const reruns = await Promise.all(
+      cards.rateCards.publishRows.mock.results.map((result) => result.value)
+    )
+    expect(reruns.map((result) => result.val)).toEqual([
+      { inserted: [], closed: [], unchanged: 2 },
+      { inserted: [], closed: [], unchanged: 2 },
+    ])
   })
 
   it("reports published and creates no draft when the hash matches a published version", async () => {

@@ -1,10 +1,13 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { OpenAPIHono } from "@hono/zod-openapi"
 import { describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 import { route as accessUpdateRoute } from "~/routes/access/updateACLV1"
 import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explainChargeV1"
 import { route as analyticsCurrentBillingPeriodUsageRoute } from "~/routes/analytics/getCurrentBillingPeriodUsageV1"
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
-import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
 import { route as budgetsAuthorizeRoute } from "~/routes/budgets/authorizeBudgetV1"
 import { route as budgetsChargeRoute } from "~/routes/budgets/chargeBudgetV1"
 import { route as budgetsGetRoute } from "~/routes/budgets/getBudgetV1"
@@ -17,12 +20,8 @@ import { route as budgetsUpsertRoute } from "~/routes/budgets/upsertBudgetV1"
 import { route as customersChangePlanRoute } from "~/routes/customers/changePlanV1"
 import { route as customersSignUpRoute } from "~/routes/customers/signUpV1"
 import { route as accessEntitlementsCurrentRoute } from "~/routes/entitlements/getCurrentEntitlementsV1"
-import { route as entitlementWindowsStatusRoute } from "~/routes/entitlements/getEntitlementWindowStatusV1"
 import { route as accessEntitlementsListRoute } from "~/routes/entitlements/getEntitlementsV1"
 import { route as accessCheckRoute } from "~/routes/entitlements/verifyV1"
-import { route as usageConsumeRoute } from "~/routes/events/ingestEventsSyncV1"
-import { route as usageRecordRoute } from "~/routes/events/ingestEventsV1"
-import { route as ingestionEventsReplayRoute } from "~/routes/events/replayIngestionEventsV1"
 import { route as featuresListRoute } from "~/routes/features/getFeaturesV1"
 import { route as invoicesGetRoute } from "~/routes/invoices/getInvoiceV1"
 import { route as monetizationApplyRoute } from "~/routes/monetization/applyMonetizationV1"
@@ -35,12 +34,9 @@ import { route as paymentProviderCallbacksStripeConnectWebhookRoute } from "~/ro
 import { route as paymentProviderCallbacksWebhookRoute } from "~/routes/payments/providers/providerWebhookV1"
 import { route as planVersionsGetRoute } from "~/routes/plans/getPlanVersionV1"
 import { route as planVersionsListRoute } from "~/routes/plans/listPlanVersionsV1"
-import { route as runsConsumeRoute } from "~/routes/runs/applyRunSyncEventV1"
-import { route as runsEndRoute } from "~/routes/runs/endRunV1"
-import { route as runsGetRoute } from "~/routes/runs/getRunV1"
-import { route as runsSettleRoute } from "~/routes/runs/settleRunV1"
-import { route as runsStartRoute } from "~/routes/runs/startRunV1"
 import { route as subscriptionsGetRoute } from "~/routes/subscriptions/getSubscriptionV1"
+import { route as usageConsumeRoute } from "~/routes/usage/consumeUsageV1"
+import { route as usageRecordRoute } from "~/routes/usage/recordUsageV1"
 import {
   walletBalanceRoute,
   walletCreditBalanceRoute,
@@ -59,18 +55,13 @@ type RouteUnderTest = {
   "x-unprice"?: EndpointContract
 }
 
-const routes = [
+const routeDefinitions = [
   accessUpdateRoute,
   accessCheckRoute,
   accessEntitlementsListRoute,
   accessEntitlementsCurrentRoute,
   usageRecordRoute,
   usageConsumeRoute,
-  runsStartRoute,
-  runsConsumeRoute,
-  runsSettleRoute,
-  runsEndRoute,
-  runsGetRoute,
   budgetsUpsertRoute,
   budgetsAuthorizeRoute,
   budgetsSettleRoute,
@@ -98,14 +89,12 @@ const routes = [
   analyticsCurrentBillingPeriodUsageRoute,
   analyticsChargesExplainRoute,
   ingestionEventsStatusRoute,
-  ingestionEventsReplayRoute,
-  entitlementWindowsStatusRoute,
-  billingReservationsFlushForInvoicingRoute,
   paymentProviderCallbacksSignUpRoute,
   paymentProviderCallbacksSetupRoute,
   paymentProviderCallbacksWebhookRoute,
   paymentProviderCallbacksStripeConnectWebhookRoute,
-].map((route) => route as RouteUnderTest)
+]
+const routes = routeDefinitions.map((route) => route as RouteUnderTest)
 
 const expectedRoutes = new Map<string, string>([
   ["access.update", "POST /v1/access/update"],
@@ -113,11 +102,6 @@ const expectedRoutes = new Map<string, string>([
   ["access.entitlements.list", "POST /v1/access/entitlements/list"],
   ["usage.record", "POST /v1/usage/record"],
   ["usage.consume", "POST /v1/usage/consume"],
-  ["runs.start", "POST /v1/runs/start"],
-  ["runs.consume", "POST /v1/runs/consume/{runId}"],
-  ["runs.settle", "POST /v1/runs/settle/{runId}"],
-  ["runs.end", "POST /v1/runs/end/{runId}"],
-  ["runs.get", "GET /v1/runs/get/{runId}"],
   ["budgets.upsert", "POST /v1/budgets/upsert"],
   ["budgets.authorize", "POST /v1/budgets/authorize"],
   ["budgets.settle", "POST /v1/budgets/settle"],
@@ -146,12 +130,6 @@ const expectedRoutes = new Map<string, string>([
   ["analytics.usage.currentBillingPeriod", "POST /v1/analytics/usage/current-billing-period"],
   ["analytics.charges.explain", "POST /v1/analytics/charges/explain"],
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
-  ["ingestionEvents.replay", "POST /v1/ingestion-events/replay"],
-  ["entitlementWindows.status", "GET /v1/internal/entitlement-windows/status"],
-  [
-    "billingReservations.flushForInvoicing",
-    "POST /v1/internal/billing-reservations/flush-for-invoicing",
-  ],
   [
     "paymentProviderCallbacks.signUp",
     "GET /v1/payment-provider-callbacks/{provider}/sign-up/{sessionId}/{projectId}",
@@ -177,11 +155,6 @@ const expectedSdkPublicOperations = [
   "access.entitlements.current",
   "usage.record",
   "usage.consume",
-  "runs.start",
-  "runs.consume",
-  "runs.settle",
-  "runs.end",
-  "runs.get",
   "budgets.upsert",
   "budgets.authorize",
   "budgets.settle",
@@ -208,7 +181,6 @@ const expectedSdkPublicOperations = [
   "analytics.usage.currentBillingPeriod",
   "analytics.charges.explain",
   "ingestionEvents.status",
-  "ingestionEvents.replay",
 ].sort()
 
 function routeKey(route: RouteUnderTest): string {
@@ -216,6 +188,30 @@ function routeKey(route: RouteUnderTest): string {
 }
 
 describe("public operation contracts", () => {
+  it("keeps published OpenAPI request and response contracts in sync with the routes", () => {
+    const app = new OpenAPIHono()
+    for (const route of routeDefinitions) {
+      if (!("hide" in route && route.hide === true)) app.openAPIRegistry.registerPath(route)
+    }
+    const generated = app.getOpenAPIDocument({
+      openapi: "3.0.3",
+      info: { title: "Unprice API", version: "1.0.0" },
+    })
+    const published = z
+      .object({ paths: z.record(z.string(), z.unknown()) })
+      .parse(JSON.parse(readFileSync(resolve(__dirname, "../../../docs/openapi.json"), "utf8")))
+    for (const route of routeDefinitions) {
+      const { path } = route
+      if ("hide" in route && route.hide === true) {
+        expect(generated.paths[path], path).toBeUndefined()
+        expect(published.paths[path], path).toBeUndefined()
+        continue
+      }
+      expect(generated.paths[path], path).toBeDefined()
+      expect(JSON.parse(JSON.stringify(generated.paths[path])), path).toEqual(published.paths[path])
+    }
+  })
+
   it("declares x-unprice metadata on every route", () => {
     expect(
       routes.map((route) => ({

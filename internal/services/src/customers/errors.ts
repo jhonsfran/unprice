@@ -16,6 +16,7 @@ export const customerErrorKinds: Partial<Record<DenyReason, DomainErrorKind>> = 
   NO_DEFAULT_PLAN_FOUND: "precondition",
   PLAN_VERSION_NOT_PUBLISHED: "precondition",
   PLAN_VERSION_NOT_ACTIVE: "precondition",
+  PLAN_VERSION_ENTERPRISE: "precondition",
   PLAN_VERSION_NOT_FOUND: "precondition",
   PAYMENT_PROVIDER_CONFIG_NOT_FOUND: "precondition",
   BILLING_INTERVAL_MISMATCH: "precondition",

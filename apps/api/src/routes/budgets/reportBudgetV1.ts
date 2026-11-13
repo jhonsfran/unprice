@@ -5,7 +5,8 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { extensionToWire, runBudgetVerb, toWire } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { balanceToWire, extensionToWire, toWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -40,6 +41,7 @@ export const registerReportBudgetV1 = (app: App) =>
     const {
       type: _,
       extension,
+      balance,
       ...reported
     } = await runBudgetVerb(c, key, {
       type: "report",
@@ -48,7 +50,11 @@ export const registerReportBudgetV1 = (app: App) =>
       request,
     })
     return c.json(
-      { ...toWire(reported), extension: extensionToWire(extension, reported.balance) },
+      {
+        ...toWire(reported),
+        balance: balanceToWire(balance),
+        extension: extensionToWire(extension, balance),
+      },
       HttpStatusCodes.OK
     )
   })

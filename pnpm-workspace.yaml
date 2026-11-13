@@ -45,7 +45,6 @@ overrides:
   undici: 7.30.1
   vite: 6.4.4
   "zod@^4.0.0": 4.6.7
-  "@jhonsfran/zod-bird@1.0.3>zod": 4.6.7
   "@unkey/error@0.2.0>zod": 4.6.7
   "@infisical/sdk@3.0.91>zod": 4.6.7
   "@mintlify/scraping@4.0.934>zod": 4.6.7
@@ -64,5 +63,4 @@ packageExtensions:
 
 patchedDependencies:
   "@mintlify/validation@0.1.813": patches/@mintlify__validation@0.1.813.patch
-  "@jhonsfran/zod-bird@1.0.3": patches/@jhonsfran__zod-bird@1.0.3.patch
   "@unkey/cache@1.5.0": patches/@unkey__cache@1.5.0.patch

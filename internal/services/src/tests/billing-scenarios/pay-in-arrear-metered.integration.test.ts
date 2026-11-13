@@ -3,9 +3,8 @@ import type { Customer, Subscription } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -84,36 +83,29 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
 
   it("P0-A rates pending periods, posts pgledger entries, creates one invoice, and is idempotent", async () => {
     const logger = createLogger()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
-    const rating = new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
-    })
     const repo = new DrizzleSubscriptionRepository(db)
     const ensureAccounts = await ledger.ensureCustomerAccounts("cus_test", "EUR")
     expect(ensureAccounts.err).toBeUndefined()
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
 
@@ -215,6 +207,5 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
         AND i.statement_key = ${statementKey}
     `)
     expect(entryCount.rows).toEqual([{ count: 4 }])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })

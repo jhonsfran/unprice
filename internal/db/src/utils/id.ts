@@ -44,9 +44,13 @@ export const prefixes = {
   entitlement_reservation_funding_leg: "erfl",
   wallet_topup: "wtup",
   wallet_credit: "wcr",
-  budget_run: "brun",
   budget: "bgt",
   budget_audit: "bga",
+  rate_card: "rc",
+  rate_card_row: "rr",
+  plan_version_rate_card: "pvrc",
+  model_cost: "mc",
+  custom_model_cost: "cmc",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

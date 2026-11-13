@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { SubscriptionInvoice } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
@@ -10,9 +9,8 @@ import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { PaymentProviderService } from "../payment-provider/service"
-import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -83,16 +81,16 @@ function makeBillingService(provider: Partial<PaymentProviderService>) {
   } as unknown as Logger
 
   const billing = new BillingService({
-    reservationFlushGateway: createBillingGatewayStub(),
-    db: {} as Database,
+    invoicing: createInvoicingStub(),
+    db: {
+      query: { subscriptions: { findFirst: vi.fn(async () => ({ customerId: "cust_1" })) } },
+    } as unknown as Database,
     logger,
-    analytics: {} as Analytics,
     waitUntil: (p) => p,
     cache: {} as Cache,
     metrics: {} as Metrics,
     customerService,
     grantsManager: {} as GrantsManager,
-    ratingService: {} as RatingService,
     ledgerService: {} as LedgerGateway,
     walletService: {} as WalletService,
   })

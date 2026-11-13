@@ -12,7 +12,6 @@ import type { IngestionStatus } from "./ingestion-health-model"
 const chartConfig = {
   processed: { label: "Processed", color: "var(--chart-1)" },
   rejected: { label: "Rejected", color: "var(--chart-3)" },
-  failed: { label: "Failed", color: "var(--chart-5)" },
 } satisfies ChartConfig
 
 type RequestPathChartProps = {
@@ -73,13 +72,6 @@ const LazyRequestPathChartContent = lazy(async () => {
             strokeWidth={2}
             dot={false}
           />
-          <Line
-            type="monotone"
-            dataKey="failed"
-            stroke="var(--color-failed)"
-            strokeWidth={2}
-            dot={false}
-          />
         </LineChart>
       </ChartContainer>
     )
@@ -109,7 +101,7 @@ export function RequestPathSparkline({
     return (
       <EvidenceSection
         title="Request path"
-        description="Processed, rejected, and failed ingestion events by second."
+        description="Accepted and rejected usage events per minute."
         className={className}
         contentClassName="mt-3"
         titleClassName="text-base"
@@ -123,9 +115,7 @@ export function RequestPathSparkline({
     <Card className={cn("border-muted/60", className)}>
       <CardHeader>
         <CardTitle>Request path</CardTitle>
-        <CardDescription>
-          Processed, rejected, and failed ingestion events by second.
-        </CardDescription>
+        <CardDescription>Accepted and rejected usage events per minute.</CardDescription>
       </CardHeader>
       <CardContent className="pb-6">
         <RequestPathChart live={live} window={window} />
@@ -144,7 +134,7 @@ function RequestPathChart({ live, window, framed = false }: RequestPathChartProp
           !framed && "border-dashed bg-transparent"
         )}
       >
-        No live ingestion samples in this window.
+        No usage events in this window.
       </EvidenceFrame>
     )
   }

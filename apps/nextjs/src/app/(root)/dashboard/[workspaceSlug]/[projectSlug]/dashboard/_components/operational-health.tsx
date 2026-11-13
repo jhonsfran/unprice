@@ -15,21 +15,10 @@ import { useIntervalFilter } from "~/hooks/use-filter"
 import { useTRPC } from "~/trpc/client"
 
 const OPERATIONAL_HEALTH_REFRESH_MS = 15 * 1000
-const OPERATIONAL_HEALTH_SKELETON_METRICS = [
-  "success",
-  "processed",
-  "rejected",
-  "failed",
-  "attention",
-]
+const OPERATIONAL_HEALTH_SKELETON_METRICS = ["success", "processed", "rejected"]
 
 const OPERATIONAL_HEALTH_SKELETON_TITLE = <Skeleton className="h-5 w-44" />
-const OPERATIONAL_HEALTH_SKELETON_BADGES = (
-  <>
-    <Skeleton className="h-5 w-20" />
-    <Skeleton className="h-5 w-24" />
-  </>
-)
+const OPERATIONAL_HEALTH_SKELETON_BADGES = <Skeleton className="h-5 w-20" />
 const OPERATIONAL_HEALTH_SKELETON_DESCRIPTION = <Skeleton className="h-4 w-[34rem] max-w-full" />
 const OPERATIONAL_HEALTH_SKELETON_ACTIONS = <Skeleton className="h-4 w-48" />
 const OPERATIONAL_HEALTH_SKELETON_LABEL = <Skeleton className="h-3 w-20" />
@@ -45,7 +34,6 @@ function buildEmptyIngestionStatus(
     totals: {
       processed: 0,
       rejected: 0,
-      failed: 0,
       total: 0,
     },
     successRate: 0,
@@ -58,7 +46,6 @@ function buildEmptyIngestionStatus(
     },
     live: [],
     rejections: [],
-    recentEvents: [],
     facets: {
       states: [],
       eventSlugs: [],
@@ -66,7 +53,6 @@ function buildEmptyIngestionStatus(
       rejectionReasons: [],
       customers: [],
     },
-    nextCursor: null,
     answer: "",
     confidence: "low",
     evidence: [],
@@ -95,7 +81,7 @@ export function OperationalHealth({ initialNow }: { initialNow: number }) {
   }, [])
 
   const { data, isFetching } = useSuspenseQuery(
-    trpc.analytics.getIngestionStatus.queryOptions(queryInput, {
+    trpc.analytics.getIngestionSummary.queryOptions(queryInput, {
       placeholderData: (previousData) => previousData ?? emptyStatus,
       staleTime: 15 * 1000,
       refetchOnWindowFocus: true,
@@ -108,7 +94,7 @@ export function OperationalHealth({ initialNow }: { initialNow: number }) {
       status={data}
       isFetching={isFetching || isInitialPlaceholder}
       title="Request-path health"
-      description={`Ingestion health for the ${interval.label}. Rejections are business denials; failures need recovery.`}
+      description={`Ingestion health for the ${interval.label}. The journal shows accepted events and business denials.`}
       className={isInitialPlaceholder ? "animate-pulse" : undefined}
       presentation="section"
       showNoEventsAction={false}
@@ -124,7 +110,7 @@ export function OperationalHealthSkeleton() {
       description={OPERATIONAL_HEALTH_SKELETON_DESCRIPTION}
       actions={OPERATIONAL_HEALTH_SKELETON_ACTIONS}
     >
-      <EvidenceMetricStrip className="md:grid-cols-5">
+      <EvidenceMetricStrip className="md:grid-cols-3">
         {OPERATIONAL_HEALTH_SKELETON_METRICS.map((metric) => (
           <EvidenceMetricTile
             key={metric}

@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { and, count, eq, inArray } from "@unprice/db"
 import {
   billingPeriods,
@@ -7,6 +6,7 @@ import {
   grants,
   invoices,
   planVersionFeatures,
+  rateCardRows,
   subscriptionItems,
   subscriptionPhases,
   versions,
@@ -23,9 +23,8 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -128,21 +127,6 @@ function meterConfig(
     aggregationMethod,
     aggregationField,
   } satisfies MeterConfig
-}
-
-function eurPrice(amount: number, displayAmount: string, scale = 2) {
-  return {
-    dinero: {
-      amount,
-      currency: {
-        code: "EUR",
-        base: 10,
-        exponent: 2,
-      },
-      scale,
-    },
-    displayAmount,
-  } satisfies NonNullable<PriceConfig["price"]>
 }
 
 function featureRow(input: {
@@ -328,6 +312,30 @@ async function loadSubscriptionContext(now = billableNow): Promise<SubscriptionC
   }
 }
 
+/** Rows on the seeded plan card (`card_test_arrear`) that price the recurring items below. */
+async function priceRecurring(
+  rows: Array<{ featureSlug: string; price: (typeof rateCardRows.$inferInsert)["price"] }>
+) {
+  await db
+    .insert(rateCardRows)
+    .values(
+      rows.map((row) => ({
+        id: `row_${row.featureSlug}`,
+        projectId,
+        rateCardId: "card_test_arrear",
+        featureSlug: row.featureSlug,
+        match: {},
+        price: row.price,
+        cost: null,
+        effectiveFrom: 0,
+        effectiveTo: null,
+        source: "manual" as const,
+        sourceRef: null,
+      }))
+    )
+    .onConflictDoNothing()
+}
+
 async function addComplexPricingConfiguration() {
   const monthlyBillingConfig = billingConfig("month")
   const dailyBillingConfig = billingConfig("day")
@@ -378,6 +386,23 @@ async function addComplexPricingConfiguration() {
     ])
     .onConflictDoNothing()
 
+  // 21 bundle units are 3 started packages of 10 at 7 EUR; 8 seats are 5 x 2 EUR + 3 x 1 EUR + 3 EUR.
+  await priceRecurring([
+    { featureSlug: "bundles", price: { type: "package", property: null, size: 10, rate: "7" } },
+    {
+      featureSlug: "seats",
+      price: {
+        type: "graduated",
+        property: null,
+        per: 1,
+        tiers: [
+          { upTo: 5, rate: "2", flat: "0" },
+          { upTo: null, rate: "1", flat: "3" },
+        ],
+      },
+    },
+  ])
+
   await db
     .insert(planVersionFeatures)
     .values([
@@ -387,7 +412,6 @@ async function addComplexPricingConfiguration() {
         featureType: "package",
         unitOfMeasure: "bundle",
         config: {
-          price: eurPrice(700, "7.00"),
           units: 10,
         },
         billingConfig: monthlyBillingConfig,
@@ -400,23 +424,7 @@ async function addComplexPricingConfiguration() {
         featureId: "feat_test_seats",
         featureType: "tier",
         unitOfMeasure: "seat",
-        config: {
-          tierMode: "graduated",
-          tiers: [
-            {
-              unitPrice: eurPrice(200, "2.00"),
-              flatPrice: eurPrice(0, "0.00"),
-              firstUnit: 1,
-              lastUnit: 5,
-            },
-            {
-              unitPrice: eurPrice(100, "1.00"),
-              flatPrice: eurPrice(300, "3.00"),
-              firstUnit: 6,
-              lastUnit: null,
-            },
-          ],
-        },
+        config: {},
         billingConfig: monthlyBillingConfig,
         resetConfig: monthlyResetConfig,
         order: 4,
@@ -429,7 +437,6 @@ async function addComplexPricingConfiguration() {
         unitOfMeasure: "token",
         config: {
           usageMode: "unit",
-          price: eurPrice(25, "0.25"),
           units: 1,
         },
         billingConfig: dailyBillingConfig,
@@ -445,7 +452,6 @@ async function addComplexPricingConfiguration() {
         unitOfMeasure: "job",
         config: {
           usageMode: "package",
-          price: eurPrice(400, "4.00"),
           units: 25,
         },
         billingConfig: weeklyBillingConfig,
@@ -664,9 +670,7 @@ async function addCoBilledCadenceConfiguration() {
         featureId: "feat_test_annual_platform",
         featureType: "flat",
         unitOfMeasure: "platform",
-        config: {
-          price: eurPrice(120000, "1200.00"),
-        },
+        config: {},
         billingConfig: annualBillingConfig,
         resetConfig: annualResetConfig,
         order: 10,
@@ -678,7 +682,6 @@ async function addCoBilledCadenceConfiguration() {
         featureType: "package",
         unitOfMeasure: "audit",
         config: {
-          price: eurPrice(1000, "10.00"),
           units: 1,
         },
         billingConfig: monthlyBillingConfig,
@@ -693,7 +696,6 @@ async function addCoBilledCadenceConfiguration() {
         unitOfMeasure: "unit",
         config: {
           usageMode: "unit",
-          price: eurPrice(10, "0.10"),
         },
         billingConfig: dailyBillingConfig,
         resetConfig: dailyResetConfig,
@@ -708,7 +710,6 @@ async function addCoBilledCadenceConfiguration() {
         unitOfMeasure: "job",
         config: {
           usageMode: "package",
-          price: eurPrice(50, "0.50"),
           units: 10,
         },
         billingConfig: hourlyBillingConfig,
@@ -719,6 +720,14 @@ async function addCoBilledCadenceConfiguration() {
       }),
     ])
     .onConflictDoNothing()
+
+  await priceRecurring([
+    { featureSlug: "annual-platform", price: { type: "flat", amount: "1200" } },
+    {
+      featureSlug: "monthly-audit",
+      price: { type: "package", property: null, size: 1, rate: "10" },
+    },
+  ])
 
   await db
     .insert(subscriptionItems)
@@ -919,12 +928,10 @@ async function addAdvanceFixedWithPriorArrearUsageConfiguration() {
 }
 
 async function runBilling({
-  analytics,
-  reservationFlushGateway,
+  payerBudgets,
   now = billableNow,
 }: {
-  analytics: Analytics
-  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
+  payerBudgets: ReturnType<typeof createRecordedUsageFixture>["payerBudgets"]
   now?: number
 }) {
   const logger = createLogger()
@@ -933,16 +940,11 @@ async function runBilling({
   expect(ensureAccounts.err).toBeUndefined()
 
   const result = await billPeriod({
-    reservationFlushGateway,
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(now),
     logger,
     db,
     repo: new DrizzleSubscriptionRepository(db),
-    ratingService: new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
-    }),
     ledgerService: ledger,
   })
 
@@ -1012,13 +1014,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("bills a plan mixing every price mode while usage meters use different billing/reset cadences", async () => {
     await addComplexPricingConfiguration()
 
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 120, amount: 112_000_000 },
       jobs: { quantity: 51, amount: 1_200_000_000 },
       tokens: { quantity: 40, amount: 1_000_000_000 },
     })
 
-    const { result, ledger } = await runBilling({ analytics, reservationFlushGateway })
+    const { result, ledger } = await runBilling({ payerBudgets })
 
     expect(result.phasesProcessed).toBe(3)
     expect(await listInvoices()).toEqual(
@@ -1070,14 +1072,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("co-bills annual, monthly, daily, and hourly periods into one invoice when they share the same statement end", async () => {
     await addCoBilledCadenceConfiguration()
 
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       "daily-units": { quantity: 30, amount: 300_000_000 },
       "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const { result, ledger } = await runBilling({
-      analytics,
-      reservationFlushGateway,
+      payerBudgets,
       now: coBilledNow,
     })
 
@@ -1134,14 +1135,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("keeps a mixed-cadence co-billed statement idempotent across reruns", async () => {
     await addCoBilledCadenceConfiguration()
 
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       "daily-units": { quantity: 30, amount: 300_000_000 },
       "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const firstRun = await runBilling({
-      analytics,
-      reservationFlushGateway,
+      payerBudgets,
       now: coBilledNow,
     })
     expect(firstRun.result.phasesProcessed).toBe(1)
@@ -1155,8 +1155,7 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     expect(firstLines.val).toHaveLength(4)
 
     const secondRun = await runBilling({
-      analytics,
-      reservationFlushGateway,
+      payerBudgets,
       now: coBilledNow,
     })
 
@@ -1184,14 +1183,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
         )
       )
 
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       "daily-units": { quantity: 30, amount: 300_000_000 },
       "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const { result, ledger } = await runBilling({
-      analytics,
-      reservationFlushGateway,
+      payerBudgets,
       now: coBilledNow,
     })
 
@@ -1406,13 +1404,12 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("co-bills pay-in-advance fixed charges with prior arrears usage on the same statement", async () => {
     await addAdvanceFixedWithPriorArrearUsageConfiguration()
 
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 120, amount: 112_000_000 },
     })
 
     const { result, ledger } = await runBilling({
-      analytics,
-      reservationFlushGateway,
+      payerBudgets,
       now: feb1 + LATE_EVENT_GRACE_MS,
     })
 

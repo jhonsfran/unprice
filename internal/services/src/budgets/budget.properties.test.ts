@@ -9,6 +9,8 @@ import {
   RECORD_ACCEPT_WINDOW_MS,
   RECORD_DEDUPE_MS,
   RECORD_FUTURE_SKEW_MS,
+  type StatementCommandType,
+  type Usage,
   anchoredWindowBounds,
   countersOf,
 } from "./index"
@@ -26,6 +28,12 @@ const hour = 60 * minute
 const day = 24 * hour
 const ZERO = BigInt(0)
 
+/** What the model takes: every verb with a usage vector; events, statements, and funding are out of scope. */
+type ModelCommand = Exclude<
+  BudgetCommand,
+  { type: StatementCommandType | "fund" | "applyFunding" } | { event: object }
+>
+
 type Window = "hour" | "day" | "week" | "month" | "never"
 type Every = "day" | "week" | "month"
 type ModelLimit = {
@@ -34,6 +42,8 @@ type ModelLimit = {
   window: Window
   anchor?: number
   enforce: "hard" | "soft"
+  /** The feature whose quantity the limit caps; absent for the amount. */
+  feature?: string
 }
 type ModelConfig = {
   limits: ModelLimit[]
@@ -42,20 +52,47 @@ type ModelConfig = {
   closesAt: number | null
 }
 type Range = { start: number; end: number | null }
-type Period = [windowId: string, start: number, end: number, consumed: bigint]
+
+/**
+ * Usage in the model's own terms: `$` is the amount, every other key a feature's quantity. Zero
+ * entries are dropped, so equal usage is equal objects.
+ */
+type Vec = Record<string, bigint>
+const AMOUNT = "$"
+
+function vec(entries: Iterable<[string, bigint]>): Vec {
+  const out: Vec = {}
+  for (const [key, value] of entries) {
+    const sum = (out[key] ?? ZERO) + value
+    if (sum === ZERO) delete out[key]
+    else out[key] = sum
+  }
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)))
+}
+const vecOf = (usage: Usage): Vec =>
+  vec([[AMOUNT, usage.amount], ...Object.entries(usage.quantities)])
+const amountVec = (amount: bigint): Vec => vec([[AMOUNT, amount]])
+const plus = (a: Vec, b: Vec): Vec => vec([...Object.entries(a), ...Object.entries(b)])
+const minus = (a: Vec, b: Vec): Vec =>
+  vec([...Object.entries(a), ...Object.entries(b).map(([k, v]): [string, bigint] => [k, -v])])
+const on = (usage: Vec, key: string) => usage[key] ?? ZERO
+const measureOf = (limit: { feature?: string }) => limit.feature ?? AMOUNT
+const exceedsOn = (a: Vec, b: Vec) => Object.keys({ ...a, ...b }).some((k) => on(a, k) > on(b, k))
+
+type Period = [windowId: string, start: number, end: number, consumed: Vec]
 
 type ModelHold = {
   key: string
-  amount: bigint
+  usage: Vec
   expiresAt: number
   status: "open" | "settled" | "released"
   changedAt: number
   settle?: Settled
-  released?: bigint
+  released?: Vec
 }
 type Settled = {
-  actual: bigint
-  released: bigint
+  actual: Vec
+  released: Vec
   expired: boolean
   crossed: string[]
 }
@@ -83,7 +120,7 @@ type ModelLease = {
 }
 type KeyedRecord = {
   verb: "authorize" | "charge" | "record"
-  amount: bigint
+  usage: Vec
   ttlMs: number | undefined
   holdNo: number
   crossed: string[]
@@ -189,7 +226,7 @@ class ReferenceBudget {
     lease: 0,
     report: 0,
   }
-  readonly consumptions: Array<{ at: number; amount: bigint }> = []
+  readonly consumptions: Array<{ at: number; usage: Vec }> = []
   readonly holds = new Map<number, ModelHold>()
   readonly leases = new Map<string, ModelLease>()
   readonly keyed = new Map<string, KeyedRecord>()
@@ -222,9 +259,9 @@ class ReferenceBudget {
   }
 
   /**
-   * A sweep settles each open hold past its expiry at its full amount, and consumes each open
-   * lease's whole grant, earliest expiry first and holds before leases: the timer cannot prove the
-   * work or the process stopped, so each counts all it permitted.
+   * A sweep settles each open hold past its expiry at all it reserved, and consumes each open
+   * lease's whole grant (an amount), earliest expiry first and holds before leases: the timer
+   * cannot prove the work or the process stopped, so each counts all it permitted.
    */
   private expire(now: number) {
     const due = [
@@ -242,18 +279,18 @@ class ReferenceBudget {
     ].sort((x, y) => x.at - y.at || x.rank - y.rank)
     for (const { hold, lease } of due) {
       if (lease) {
-        this.consumptions.push({ at: now, amount: lease.granted - lease.captured })
+        this.consumptions.push({ at: now, usage: amountVec(lease.granted - lease.captured) })
         Object.assign(lease, { captured: lease.granted, status: "expired", changedAt: now })
         continue
       }
       if (!hold) continue
       const settle = {
-        actual: hold.amount,
-        released: ZERO,
+        actual: hold.usage,
+        released: {},
         expired: true,
-        crossed: this.crossed(now, hold.amount),
+        crossed: this.crossed(now, hold.usage),
       }
-      this.consumptions.push({ at: now, amount: hold.amount })
+      this.consumptions.push({ at: now, usage: hold.usage })
       Object.assign(hold, { status: "settled", changedAt: now, settle })
     }
   }
@@ -280,11 +317,11 @@ class ReferenceBudget {
     )
   }
 
-  /** Consumption the segment counted in `range`. */
-  counted(segment: Segment, range: Range): bigint {
-    let sum = ZERO
+  /** Consumption the segment counted in `range`, on every measure. */
+  counted(segment: Segment, range: Range): Vec {
+    let sum: Vec = {}
     for (const c of this.countedBy(segment)) {
-      if (c.at >= range.start && (range.end === null || c.at < range.end)) sum += c.amount
+      if (c.at >= range.start && (range.end === null || c.at < range.end)) sum = plus(sum, c.usage)
     }
     return sum
   }
@@ -306,11 +343,11 @@ class ReferenceBudget {
         if (range.end === null || range.end > now) continue
         if (!this.limitedAt(segment.id, range.end)) continue
         const key = `${segment.id}|${range.start}`
-        const prior = periods.get(key)?.[3] ?? ZERO
-        periods.set(key, [segment.id, range.start, range.end, prior + c.amount])
+        const prior = periods.get(key)?.[3] ?? {}
+        periods.set(key, [segment.id, range.start, range.end, plus(prior, c.usage)])
       }
     }
-    return sortPeriods([...periods.values()].filter((period) => period[3] > ZERO))
+    return sortPeriods([...periods.values()].filter((period) => Object.keys(period[3]).length > 0))
   }
 
   /** Follows a config change: new anchors count from `now`, dropped ones until their period ends. */
@@ -332,16 +369,21 @@ class ReferenceBudget {
     }
   }
 
-  /** Open holds count their amount; open leases what they were granted and have not reported. */
-  held(): bigint {
-    let held = ZERO
-    for (const hold of this.holds.values()) if (hold.status === "open") held += hold.amount
+  /**
+   * Open holds count all they reserved; open leases the amount they were granted and have not
+   * reported.
+   */
+  held(): Vec {
+    let held: Vec = {}
+    for (const hold of this.holds.values())
+      if (hold.status === "open") held = plus(held, hold.usage)
     for (const lease of this.leases.values()) {
-      if (lease.status === "open") held += lease.granted - lease.captured
+      if (lease.status === "open") held = plus(held, amountVec(lease.granted - lease.captured))
     }
     return held
   }
 
+  /** Each limit on its own measure; `remaining` is the least over hard amount limits. */
   balance(now: number) {
     const config = this.config
     if (!config) throw new Error("no config")
@@ -349,29 +391,43 @@ class ReferenceBudget {
     const limits = config.limits.map((limit) => {
       const range = rangeOf(limit.window, limit.anchor, now)
       const segment = this.segmentAt(idOf(limit), now)
-      const consumed = segment ? this.counted(segment, range) : ZERO
+      const consumed = segment ? on(this.counted(segment, range), measureOf(limit)) : ZERO
+      const heldOn = on(held, measureOf(limit))
       return {
         ...limit,
         consumed,
-        held,
-        remaining: limit.amount - consumed - held,
+        held: heldOn,
+        remaining: limit.amount - consumed - heldOn,
         resetsAt: range.end,
       }
     })
-    const hard = limits.filter((l) => l.enforce === "hard").map((l) => l.remaining)
+    const hard = limits
+      .filter((l) => l.enforce === "hard" && l.feature === undefined)
+      .map((l) => l.remaining)
     const remaining = hard.length ? hard.reduce((a, b) => (b < a ? b : a)) : null
     return { held, limits, remaining }
   }
 
-  crossed(now: number, amount: bigint): string[] {
+  crossed(now: number, usage: Vec): string[] {
     return this.balance(now)
-      .limits.filter((l) => l.consumed <= l.amount && l.consumed + amount > l.amount)
+      .limits.filter((l) => {
+        const more = on(usage, measureOf(l))
+        return l.consumed <= l.amount && l.consumed + more > l.amount
+      })
       .map((l) => l.id)
   }
 
-  block(now: number, amount: bigint): { limitId: string; remedy: string } | null {
+  /**
+   * The hard limit that denies `usage`: an amount limit always, a quantity limit only when `usage`
+   * carries its feature.
+   */
+  block(now: number, usage: Vec): { limitId: string; remedy: string } | null {
+    const need = (l: ModelLimit) => on(usage, measureOf(l))
     const failing = this.balance(now).limits.filter(
-      (l) => l.enforce === "hard" && l.remaining - amount < ZERO
+      (l) =>
+        l.enforce === "hard" &&
+        (l.feature === undefined || need(l) > ZERO) &&
+        l.remaining - need(l) < ZERO
     )
     if (failing.length === 0) return null
     let pick = failing[0]!
@@ -379,14 +435,14 @@ class ReferenceBudget {
       if (pick.resetsAt !== null && (l.resetsAt === null || l.resetsAt > pick.resetsAt)) pick = l
     }
     let remedy = "raise_limit"
-    if (failing.every((l) => l.consumed + amount <= l.amount)) remedy = "release_holds"
-    else if (failing.every((l) => l.resetsAt !== null && l.held + amount <= l.amount))
+    if (failing.every((l) => l.consumed + need(l) <= l.amount)) remedy = "release_holds"
+    else if (failing.every((l) => l.resetsAt !== null && l.held + need(l) <= l.amount))
       remedy = "wait_for_reset"
-    if (remedy === "raise_limit") pick = failing.find((limit) => amount > limit.amount) ?? pick
+    if (remedy === "raise_limit") pick = failing.find((limit) => need(limit) > limit.amount) ?? pick
     return { limitId: pick.id, remedy }
   }
 
-  /** What fits under every hard limit, never negative; null with no hard limit. */
+  /** The amount that fits under every hard amount limit, never negative; null with none. */
   private room(now: number): bigint | null {
     const { remaining } = this.balance(now)
     if (remaining === null) return null
@@ -415,7 +471,7 @@ class ReferenceBudget {
    * kept, so the same key replays it even after room returns. It changes no balance or count.
    */
   private grant(
-    command: Extract<BudgetCommand, { type: "lease" }>,
+    command: Extract<ModelCommand, { type: "lease" }>,
     config: ModelConfig,
     now: number
   ) {
@@ -434,7 +490,7 @@ class ReferenceBudget {
     if (config.closesAt !== null && now >= config.closesAt) return { error: "BUDGET_CLOSED" }
     const room = this.room(now)
     const granted = room === null || room >= amount ? amount : room
-    const blocked = granted === ZERO ? this.block(now, amount) : null
+    const blocked = granted === ZERO ? this.block(now, amountVec(amount)) : null
     const lease: ModelLease = {
       requested: amount,
       ttlMs,
@@ -459,7 +515,7 @@ class ReferenceBudget {
    * extends by what fits after it and renews below half the TTL; a final one returns the rest.
    */
   private report(
-    command: Extract<BudgetCommand, { type: "report" }>,
+    command: Extract<ModelCommand, { type: "report" }>,
     config: ModelConfig,
     now: number
   ) {
@@ -485,8 +541,8 @@ class ReferenceBudget {
     if (!request.final && now >= lease.expiresAt) return { error: "LEASE_CLOSED" }
 
     const delta = request.captured - lease.captured
-    const crossed = this.crossed(now, delta)
-    if (delta > ZERO) this.consumptions.push({ at: now, amount: delta })
+    const crossed = this.crossed(now, amountVec(delta))
+    if (delta > ZERO) this.consumptions.push({ at: now, usage: amountVec(delta) })
     lease.captured = request.captured
     let extended = ZERO
     let denied: Denial | null = null
@@ -499,7 +555,7 @@ class ReferenceBudget {
       if (extended < extend) {
         denied = closed
           ? { code: "BUDGET_CLOSED" }
-          : { code: "LIMIT_EXCEEDED", ...this.block(now, extend) }
+          : { code: "LIMIT_EXCEEDED", ...this.block(now, amountVec(extend)) }
       }
       lease.granted += extended
       if (2 * (lease.expiresAt - now) < lease.ttlMs) lease.expiresAt = now + lease.ttlMs
@@ -516,7 +572,7 @@ class ReferenceBudget {
     return { outcome: this.reported(leaseKey, lease, false), wrote: true, checkBalance: true }
   }
 
-  apply(command: BudgetCommand, clock: number): Expected {
+  apply(command: ModelCommand, clock: number): Expected {
     const now = Math.max(clock, this.lastWriteAt)
     const decided = this.decide(command, now)
     // A rejection writes nothing, except a refused lease, which is kept like an accepted command.
@@ -539,12 +595,14 @@ class ReferenceBudget {
   }
 
   private decide(
-    command: BudgetCommand,
+    command: ModelCommand,
     now: number
   ): Rejected | { outcome: Record<string, unknown>; wrote: boolean; checkBalance: boolean } {
     if (command.type === "upsert") {
       const next: ModelConfig = {
-        limits: command.config.limits.map((l) => ({ ...l })),
+        limits: command.config.limits.map(({ measure, ...l }) =>
+          measure.type === "quantity" ? { ...l, feature: measure.feature } : { ...l }
+        ),
         defaultTtlMs: command.config.holds.defaultTtlMs,
         maxTtlMs: command.config.holds.maxTtlMs,
         closesAt: command.config.closesAt,
@@ -556,9 +614,14 @@ class ReferenceBudget {
         next.closesAt = Math.max(next.closesAt, floor)
       }
       if (this.config && command.unit !== this.unit) return { error: "UNIT_IMMUTABLE" }
-      const windowOf = new Map(this.config?.limits.map((l) => [l.id, idOf(l)]))
-      if (next.limits.some((l) => (windowOf.get(l.id) ?? idOf(l)) !== idOf(l))) {
-        return { error: "LIMIT_WINDOW_IMMUTABLE" }
+      // A limit id keeps its window and its measure: the first limit that moves either is refused.
+      const previous = new Map(this.config?.limits.map((l) => [l.id, l]))
+      for (const limit of next.limits) {
+        const before = previous.get(limit.id)
+        if (before && idOf(before) !== idOf(limit)) return { error: "LIMIT_WINDOW_IMMUTABLE" }
+        if (before && measureOf(before) !== measureOf(limit)) {
+          return { error: "LIMIT_MEASURE_IMMUTABLE" }
+        }
       }
       const configIdentity = (value: ModelConfig) => ({
         ...value,
@@ -592,11 +655,12 @@ class ReferenceBudget {
         for (const limit of next.limits) {
           const segment = this.segmentAt(idOf(limit), now)
           const consumed = segment
-            ? this.counted(segment, rangeOf(limit.window, limit.anchor, now))
+            ? on(this.counted(segment, rangeOf(limit.window, limit.anchor, now)), measureOf(limit))
             : ZERO
           const before = this.config.limits.find((l) => l.id === limit.id)
           const kept = before?.enforce === "hard" && limit.amount >= before.amount
-          if (limit.enforce === "hard" && limit.amount < consumed + held && !kept) {
+          const heldOn = on(held, measureOf(limit))
+          if (limit.enforce === "hard" && limit.amount < consumed + heldOn && !kept) {
             return { error: "LIMIT_BELOW_USAGE" }
           }
         }
@@ -640,40 +704,42 @@ class ReferenceBudget {
             checkBalance: true,
           }
         }
-        const released = hold.amount
+        const released = hold.usage
         Object.assign(hold, { status: "released", changedAt: now, released })
         return { outcome: { released, replayed: false }, wrote: true, checkBalance: true }
       }
 
-      const actual = command.amount
+      const actual = vecOf(command.actual)
       if (hold.status === "settled" && hold.settle) {
-        return hold.settle.actual === actual
+        return stringify(hold.settle.actual) === stringify(actual)
           ? { outcome: { ...hold.settle, replayed: true }, wrote: false, checkBalance: true }
           : { error: "HOLD_CLOSED" }
       }
       if (hold.status === "released") return { error: "HOLD_CLOSED" }
-      if (actual > hold.amount) return { error: "HOLD_AMOUNT_EXCEEDED" }
+      // Every measure must fit what was reserved.
+      if (exceedsOn(actual, hold.usage)) return { error: "HOLD_AMOUNT_EXCEEDED" }
 
       const settled: Settled = {
         actual,
-        released: hold.amount - actual,
+        released: minus(hold.usage, actual),
         expired: now >= hold.expiresAt,
         crossed: this.crossed(now, actual),
       }
-      this.consumptions.push({ at: now, amount: actual })
+      this.consumptions.push({ at: now, usage: actual })
       Object.assign(hold, { status: "settled", changedAt: now, settle: settled })
       return { outcome: { ...settled, replayed: false }, wrote: true, checkBalance: true }
     }
     if (command.type === "lease") return this.grant(command, config, now)
     if (command.type === "report") return this.report(command, config, now)
 
-    const amount = command.amount
+    const usage = vecOf(command.usage)
     const ttlMs = command.type === "authorize" ? command.ttlMs : undefined
     const occurredAt = command.type === "record" ? command.occurredAt : undefined
     const stored = this.keyed.get(command.idempotencyKey)
     const prior = stored && this.keyedLive(stored, now) ? stored : undefined
     if (prior) {
-      if (prior.verb !== command.type || prior.amount !== amount || prior.ttlMs !== ttlMs) {
+      const same = stringify(prior.usage) === stringify(usage)
+      if (prior.verb !== command.type || !same || prior.ttlMs !== ttlMs) {
         return { error: "IDEMPOTENCY_CONFLICT" }
       }
       const outcome =
@@ -683,7 +749,7 @@ class ReferenceBudget {
               expiresAt: this.holds.get(prior.holdNo)?.expiresAt,
               replayed: true,
             }
-          : { amount: prior.amount, crossed: prior.crossed, replayed: true }
+          : { usage: prior.usage, crossed: prior.crossed, replayed: true }
       return { outcome, wrote: false, checkBalance: true }
     }
 
@@ -699,12 +765,12 @@ class ReferenceBudget {
     if (config.closesAt !== null && now >= config.closesAt + grace) {
       return { error: "BUDGET_CLOSED" }
     }
-    const blocked = command.type === "record" ? null : this.block(now, amount)
+    const blocked = command.type === "record" ? null : this.block(now, usage)
     if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked }
-    const crossed = this.crossed(now, amount)
+    const crossed = this.crossed(now, usage)
     const rec: KeyedRecord = {
       verb: command.type,
-      amount,
+      usage,
       ttlMs,
       holdNo: 0,
       crossed,
@@ -715,7 +781,7 @@ class ReferenceBudget {
     this.keyed.set(command.idempotencyKey, rec)
 
     if (command.type !== "authorize") {
-      this.consumptions.push({ at: now, amount })
+      this.consumptions.push({ at: now, usage })
       return { outcome: { crossed, replayed: false }, wrote: true, checkBalance: true }
     }
     this.holdCount += 1
@@ -723,7 +789,7 @@ class ReferenceBudget {
     const expiresAt = now + effectiveTtl
     this.holds.set(this.holdCount, {
       key: command.idempotencyKey,
-      amount,
+      usage,
       expiresAt,
       status: "open",
       changedAt: now,
@@ -768,9 +834,16 @@ const anchorArb = fc.constantFrom(
   Date.parse("2027-03-31T12:00:00.000Z")
 )
 
-function configArb(scale: bigint): fc.Arbitrary<BudgetConfig> {
+/** The features one scenario's quantity limits and usage name. */
+const featuresArb = fc.shuffledSubarray(["images", "calls", "tokens"], {
+  minLength: 1,
+  maxLength: 3,
+})
+
+function configArb(scale: bigint, features: readonly string[]): fc.Arbitrary<BudgetConfig> {
   // Half the ids name their window id, so most upserts pass the fixed-window rule and keep
-  // re-adding the same anchors; the shared names exercise renames and LIMIT_WINDOW_IMMUTABLE.
+  // re-adding the same anchors; the shared names exercise renames, LIMIT_WINDOW_IMMUTABLE, and
+  // LIMIT_MEASURE_IMMUTABLE. Half the limits cap a feature's quantity instead of the amount.
   const limit = fc
     .record({
       name: fc.constantFrom("a", "b", "c", "d", null, null, null, null),
@@ -778,13 +851,17 @@ function configArb(scale: bigint): fc.Arbitrary<BudgetConfig> {
       window: windowArb,
       anchor: fc.option(anchorArb, { freq: 2, nil: undefined }),
       enforce: fc.constantFrom<"hard" | "soft">("hard", "hard", "soft"),
+      feature: fc.option(fc.constantFrom(...features), { freq: 2, nil: undefined }),
     })
-    .map(({ name, anchor, ...rest }) => {
+    .map(({ name, anchor, feature, ...rest }) => {
       const limit =
         anchor === undefined || rest.window === "hour" || rest.window === "never"
           ? rest
           : { ...rest, anchor }
-      return { id: name ?? idOf(limit), ...limit }
+      const measure: BudgetConfig["limits"][number]["measure"] =
+        feature === undefined ? { type: "amount" } : { type: "quantity", feature }
+      const id = name ?? (feature === undefined ? idOf(limit) : `${feature}:${idOf(limit)}`)
+      return { id, ...limit, measure }
     })
   return fc
     .record({
@@ -816,10 +893,11 @@ function configArb(scale: bigint): fc.Arbitrary<BudgetConfig> {
  * record names its `occurredAt` relative to the clock; `retry-record` resends the last record.
  */
 type Planned =
-  | BudgetCommand
-  | { type: "settle-ref"; offset: number; amount: bigint }
+  | ModelCommand
+  /** `all` and `half` settle the named hold's reservation, or half of each measure of it. */
+  | { type: "settle-ref"; offset: number; portion: "all" | "half" | Usage }
   | { type: "release-ref"; offset: number }
-  | { type: "record-ref"; idempotencyKey: string; amount: bigint; occurredOffset: number }
+  | { type: "record-ref"; idempotencyKey: string; usage: Usage; occurredOffset: number }
   | { type: "retry" }
   | { type: "retry-record" }
   /**
@@ -836,10 +914,29 @@ type Planned =
       extend: bigint
     }
 
-function commandArb(scale: bigint): fc.Arbitrary<Planned> {
+function commandArb(scale: bigint, features: readonly string[]): fc.Arbitrary<Planned> {
   const amount = fc
     .oneof(fc.constantFrom(0, 1, 5, 20, 50, 120, 400), fc.integer({ min: 0, max: 400 }))
     .map((k) => BigInt(k) * scale)
+  // Each feature's quantity is absent half the time, and sometimes an explicit zero, which the
+  // core must treat as absent.
+  const quantity = fc
+    .oneof(fc.constantFrom(0, 1, 5, 20, 50), fc.integer({ min: 0, max: 60 }))
+    .map((k) => BigInt(k) * scale)
+  const usage: fc.Arbitrary<Usage> = fc
+    .tuple(
+      amount,
+      fc.tuple(...features.map(() => fc.option(quantity, { freq: 2, nil: undefined })))
+    )
+    .map(([amount, quantities]) => ({
+      amount,
+      quantities: Object.fromEntries(
+        features.flatMap((feature, i) => {
+          const q = quantities[i]
+          return q === undefined ? [] : [[feature, q] as const]
+        })
+      ),
+    }))
   const key = fc.constantFrom("k0", "k1", "k2", "k3", "k4", "k5")
   const offset = fc.constantFrom(0, 0, 0, 1, 1, 2, 4, -1)
   const ttlMs = fc.constantFrom(
@@ -867,22 +964,22 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
     hour
   )
   const charge = fc
-    .record({ idempotencyKey: key, amount })
-    .map(({ idempotencyKey, amount }): Planned => ({ type: "charge", idempotencyKey, amount }))
+    .record({ idempotencyKey: key, usage })
+    .map(({ idempotencyKey, usage }): Planned => ({ type: "charge", idempotencyKey, usage }))
   const record = fc
-    .record({ idempotencyKey: key, amount, occurredOffset })
+    .record({ idempotencyKey: key, usage, occurredOffset })
     .map((planned): Planned => ({ type: "record-ref", ...planned }))
   const authorize = fc
-    .record({ idempotencyKey: key, amount, ttlMs })
+    .record({ idempotencyKey: key, usage, ttlMs })
     .map(
-      ({ idempotencyKey, amount, ttlMs }): Planned =>
+      ({ idempotencyKey, usage, ttlMs }): Planned =>
         ttlMs === undefined
-          ? { type: "authorize", idempotencyKey, amount }
-          : { type: "authorize", idempotencyKey, amount, ttlMs }
+          ? { type: "authorize", idempotencyKey, usage }
+          : { type: "authorize", idempotencyKey, usage, ttlMs }
     )
   const upsert = fc
     .record({
-      config: configArb(scale),
+      config: configArb(scale, features),
       unit: fc.constantFrom("money:USD", "money:USD", "money:EUR"),
       mayLoosen: fc.constantFrom(true, true, false),
     })
@@ -928,14 +1025,17 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
     {
       weight: 4,
       arbitrary: fc
-        .record({ offset, amount })
-        .map(({ offset, amount }): Planned => ({ type: "settle-ref", offset, amount })),
+        .record({
+          offset,
+          portion: fc.oneof(fc.constantFrom<"all" | "half">("all", "half"), usage),
+        })
+        .map(({ offset, portion }): Planned => ({ type: "settle-ref", offset, portion })),
     },
     { weight: 2, arbitrary: offset.map((offset): Planned => ({ type: "release-ref", offset })) },
     {
       weight: 1,
       arbitrary: fc.constantFrom<Planned>(
-        { type: "settle", holdId: "hold_1", amount: scale },
+        { type: "settle", holdId: "hold_1", actual: { amount: scale, quantities: {} } },
         { type: "release", holdId: "h_0" }
       ),
     },
@@ -950,25 +1050,42 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
 
 function resolve(
   planned: Planned,
-  previous: { command: BudgetCommand; record: BudgetCommand | null },
+  previous: { command: ModelCommand; record: ModelCommand | null },
   model: ReferenceBudget,
   clock: number
-): BudgetCommand {
+): ModelCommand {
   const holdId = (offset: number) => `h_${Math.max(0, model.holdCount - offset)}`
   switch (planned.type) {
     case "retry":
       return previous.command
     case "retry-record":
       return previous.record ?? { type: "get" }
-    case "settle-ref":
-      return { type: "settle", holdId: holdId(planned.offset), amount: planned.amount }
+    case "settle-ref": {
+      const { offset, portion } = planned
+      if (typeof portion !== "string") {
+        return { type: "settle", holdId: holdId(offset), actual: portion }
+      }
+      const reserved = model.holds.get(model.holdCount - offset)?.usage ?? {}
+      const share = (value: bigint) => (portion === "all" ? value : value / BigInt(2))
+      const { [AMOUNT]: amount = ZERO, ...quantities } = reserved
+      return {
+        type: "settle",
+        holdId: holdId(offset),
+        actual: {
+          amount: share(amount),
+          quantities: Object.fromEntries(
+            Object.entries(quantities).map(([feature, q]) => [feature, share(q)])
+          ),
+        },
+      }
+    }
     case "release-ref":
       return { type: "release", holdId: holdId(planned.offset) }
     case "record-ref":
       return {
         type: "record",
         idempotencyKey: planned.idempotencyKey,
-        amount: planned.amount,
+        usage: planned.usage,
         occurredAt: clock + planned.occurredOffset,
       }
     case "report-ref": {
@@ -1018,29 +1135,38 @@ function advance(clock: number, by: number | "hour-edge" | "day-edge"): number {
 /** Seconds between calls, so leases live through many reports before they expire. */
 const steadyAdvanceArb = fc.constantFrom(0, second, 10 * second, minute)
 
-const scenarioArb = fc.tuple(scaleArb, fc.boolean()).chain(([scale, steady]) =>
-  fc.record({
-    config: configArb(scale),
-    steps: fc.array(
-      fc.record({
-        advanceMs: steady ? steadyAdvanceArb : advanceArb,
-        alarm: fc.boolean(),
-        planned: commandArb(scale),
-      }),
-      {
-        minLength: 15,
-        maxLength: 80,
-      }
-    ),
-  })
-)
+const scenarioArb = fc
+  .tuple(scaleArb, fc.boolean(), featuresArb)
+  .chain(([scale, steady, features]) =>
+    fc.record({
+      config: configArb(scale, features),
+      steps: fc.array(
+        fc.record({
+          advanceMs: steady ? steadyAdvanceArb : advanceArb,
+          alarm: fc.boolean(),
+          planned: commandArb(scale, features),
+        }),
+        {
+          minLength: 15,
+          maxLength: 80,
+        }
+      ),
+    })
+  )
 
 function balanceView(balance: BudgetBalance) {
   return {
     remaining: balance.remaining,
-    held: balance.held,
+    held: vecOf(balance.held),
     limits: balance.limits.map((l) => [l.id, l.remaining, l.resetsAt]),
   }
+}
+
+/** A core usage vector in the model's terms; anything else as it is. */
+function modelValue(value: unknown): unknown {
+  const isUsage =
+    value !== null && typeof value === "object" && "amount" in value && "quantities" in value
+  return isUsage ? vecOf(value as Usage) : value
 }
 
 function outcomeFields(outcome: BudgetOutcome, expected: Record<string, unknown>) {
@@ -1056,14 +1182,16 @@ function outcomeFields(outcome: BudgetOutcome, expected: Record<string, unknown>
         : denied && { code: denied.code }
     source = { ...outcome, extension: { ...outcome.extension, denied: projected } }
   }
-  for (const key of Object.keys(expected)) picked[key] = (source as Record<string, unknown>)[key]
+  for (const key of Object.keys(expected)) {
+    picked[key] = modelValue((source as Record<string, unknown>)[key])
+  }
   return picked
 }
 
 function rolledInStore(store: MemoryBudgetStore): Period[] {
   return sortPeriods(
     [...store.history.values()].flatMap((periods) =>
-      periods.map((p): Period => [p.windowId, p.start, p.end, p.consumed])
+      periods.map((p): Period => [p.windowId, p.start, p.end, vecOf(p.consumed)])
     )
   )
 }
@@ -1080,8 +1208,8 @@ function keptPeriods(periods: Period[]): Period[] {
 
 /** Per live counter: what the ledger counts in the current period against what the model attributes. */
 function countersView(ledger: Ledger, model: ReferenceBudget, now: number) {
-  const actual: Record<string, bigint> = {}
-  const expected: Record<string, bigint> = {}
+  const actual: Record<string, Vec> = {}
+  const expected: Record<string, Vec> = {}
   for (const segment of model.segments) {
     if (segment.until !== null && now >= segment.until) continue
     expected[segment.id] = model.counted(segment, rangeOf(segment.window, segment.anchor, now))
@@ -1091,9 +1219,11 @@ function countersView(ledger: Ledger, model: ReferenceBudget, now: number) {
     const range = segment ? rangeOf(segment.window, segment.anchor, now) : null
     const current = id === "never" || counter.start === range?.start
     // A counter left behind in an ended period may only linger empty: its roll had nothing to say.
-    if (current) actual[id] = counter.consumed
-    else if (counter.consumed !== ZERO) actual[id] = -counter.consumed
-    else if (segment) actual[id] = ZERO
+    const consumed = vecOf(counter.consumed)
+    const empty = Object.keys(consumed).length === 0
+    if (current) actual[id] = consumed
+    else if (!empty) actual[id] = { ...consumed, lingering: BigInt(1) }
+    else if (segment) actual[id] = {}
   }
   return { actual, expected }
 }
@@ -1108,7 +1238,7 @@ describe("budget core against a reference model", () => {
         let clock = start
         /** Every event a record counted: its key, amount, and `occurredAt`. */
         const recordedEvents: string[] = []
-        const previous: { command: BudgetCommand; record: BudgetCommand | null } = {
+        const previous: { command: ModelCommand; record: ModelCommand | null } = {
           command: {
             type: "upsert",
             key: "customer:acme",
@@ -1162,8 +1292,8 @@ describe("budget core against a reference model", () => {
 
           const { outcome, ledger } = result.val
           if (command.type === "record" && outcome.type === "record" && !outcome.replayed) {
-            const { idempotencyKey, amount, occurredAt } = command
-            recordedEvents.push(`${idempotencyKey}|${amount}|${occurredAt}`)
+            const { idempotencyKey, usage, occurredAt } = command
+            recordedEvents.push(`${idempotencyKey}|${stringify(vecOf(usage))}|${occurredAt}`)
           }
           const now = Math.max(clock, model.lastWriteAt)
           expect(outcomeFields(outcome, expected.outcome)).toEqual(expected.outcome)
@@ -1175,14 +1305,21 @@ describe("budget core against a reference model", () => {
                   ? outcome.budget.balance
                   : null
             const reference = model.balance(now)
-            // Only a record passes a hard limit, so admitted gated spend always fits.
+            // Only a record passes a hard limit, so admitted spend fits every limit that gates it:
+            // each amount limit, and each quantity limit whose feature the request carries.
             const admitted =
               (outcome.type === "authorize" ||
                 outcome.type === "charge" ||
                 outcome.type === "lease") &&
               !outcome.replayed
             for (const limit of admitted ? (balance?.limits ?? []) : []) {
-              if (limit.enforce === "hard")
+              const { measure } = limit
+              const carried =
+                "usage" in command && measure.type === "quantity"
+                  ? (command.usage.quantities[measure.feature] ?? ZERO)
+                  : ZERO
+              const gated = measure.type === "amount" || carried > ZERO
+              if (limit.enforce === "hard" && gated)
                 expect(limit.consumed + limit.held <= limit.amount).toBe(true)
             }
             expect(balance && balanceView(balance)).toEqual({
@@ -1199,7 +1336,7 @@ describe("budget core against a reference model", () => {
           if (outcome.type === "get" && model.config) {
             const ids = [...new Set(model.config.limits.map(idOf))]
             expect(
-              outcome.history.map((p): Period => [p.windowId, p.start, p.end, p.consumed])
+              outcome.history.map((p): Period => [p.windowId, p.start, p.end, vecOf(p.consumed)])
             ).toEqual(
               ids.flatMap((id) =>
                 rolled

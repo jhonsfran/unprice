@@ -281,13 +281,13 @@ export const registerApplyMonetizationV1 = (app: App) =>
       const { config } = c.req.valid("json")
 
       const key = await keyAuth(c, { requireType: "config" })
-      const { plans, features, events } = c.get("services")
+      const { plans, features, events, rateCards } = c.get("services")
 
       startTime(c, "applyMonetizationConfig")
 
       const { err, val } = await applyMonetizationConfig(
         {
-          services: { plans, features, events },
+          services: { plans, features, events, rateCards },
           db: c.get("db"),
           logger: c.get("logger"),
         },

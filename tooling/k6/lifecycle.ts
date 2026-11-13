@@ -72,7 +72,6 @@ export default async function (): Promise<void> {
 
       const usageResult = await client.usage.consume({
         customerId: vuCustomerId,
-        featureSlug: usageTarget.featureSlug,
         eventSlug: usageTarget.eventSlug,
         properties: ingestionProperties,
         idempotencyKey: uuidV4(),
@@ -85,25 +84,8 @@ export default async function (): Promise<void> {
         break
       }
 
-      const usageOk = check(usageResult, {
-        "usage.consume succeeds": (res) => !res.error && !!res.result,
-      })
-
-      if (!usageOk || usageResult.error) {
-        hardFail(`usage.consume failed: ${describeSdkError(usageResult)}`)
-      }
-
-      if (usageResult.result.allowed) {
-        if (candidateIndex > 0) {
-          usageEventsRerouted.add(1)
-        }
-        eventHandled = true
-        break
-      }
-
-      const rejectedType = classifySyncIngestionRejection(usageResult.result)
-
-      if (rejectedType === "usage_limited") {
+      // A limit with no room denies with a 402; try the next usage target.
+      if (usageResult.error?.code === "BUDGET_EXCEEDED") {
         usageEventsLimitExceeded.add(1)
 
         if (candidateIndex < featureCandidates.length - 1) {
@@ -114,11 +96,23 @@ export default async function (): Promise<void> {
         break
       }
 
-      hardFail(`usage.consume rejected unexpectedly: ${JSON.stringify(usageResult.result)}`)
+      const usageOk = check(usageResult, {
+        "usage.consume succeeds": (res) => !res.error && !!res.result,
+      })
+
+      if (!usageOk || usageResult.error) {
+        hardFail(`usage.consume failed: ${describeSdkError(usageResult)}`)
+      }
+
+      if (candidateIndex > 0) {
+        usageEventsRerouted.add(1)
+      }
+      eventHandled = true
+      break
     }
 
     if (!eventHandled) {
-      hardFail("ingestSync usage event could not be handled by any usage target")
+      hardFail("usage.consume event could not be handled by any usage target")
     }
 
     usageEventsSent.add(1)
@@ -176,16 +170,6 @@ function uuidV4(): string {
     const v = c === "x" ? r : (r & 0x3) | 0x8
     return v.toString(16)
   })
-}
-
-function classifySyncIngestionRejection(result: { rejectionReason?: string }):
-  | "usage_limited"
-  | "unknown" {
-  if (result.rejectionReason === "LIMIT_EXCEEDED") {
-    return "usage_limited"
-  }
-
-  return "unknown"
 }
 
 function buildIngestionProperties(
